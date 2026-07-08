@@ -124,6 +124,10 @@ export function PageRooms() {
   // ── UI 상태 ──
   const [selectedStat,  setSelectedStat]  = useState<string | null>(null);
   const [editingKey,    setEditingKey]    = useState<string | null>(null);
+  // ── 층별 배치도 인터랙션 상태 ──
+  const [floorSelectedRoom, setFloorSelectedRoom] = useState<string | null>(null);
+  const [floorHoveredRoom,  setFloorHoveredRoom]  = useState<string | null>(null);
+  const [nameSearch,        setNameSearch]        = useState('');
   const [editForm,      setEditForm]      = useState<Partial<AssignmentRow>>({});
   const [showAddForm,   setShowAddForm]   = useState(false);
   const [addForm,       setAddForm]       = useState<Partial<AssignmentRow>>({});
@@ -312,6 +316,27 @@ export function PageRooms() {
 
   const detailMain  = selectedStat?.split('::')[0] ?? '';
   const detailFloor = selectedStat?.split('::')[1] ?? null;
+
+  // 층 바뀌면 호실 선택/검색 초기화
+  const prevDetailFloor = useRef<string | null>(null);
+  if (prevDetailFloor.current !== detailFloor) {
+    prevDetailFloor.current = detailFloor;
+    if (floorSelectedRoom) setFloorSelectedRoom(null);
+    if (nameSearch) setNameSearch('');
+  }
+
+  // 이름 검색 → 해당 입실자가 있는 호실 집합
+  const nameSearchTrim = nameSearch.trim();
+  const searchHighlightRooms = nameSearchTrim && detailFloor
+    ? new Set(filteredAssignments
+        .filter(a => a.room_no[0] === detailFloor && (a.name ?? '').includes(nameSearchTrim))
+        .map(a => a.room_no))
+    : undefined;
+
+  // 선택 호실의 입실 명단
+  const selectedRoomOccupants = floorSelectedRoom
+    ? filteredAssignments.filter(a => a.room_no === floorSelectedRoom)
+    : [];
 
   const thSt = { textAlign: 'left' as const, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.08em', color: 'var(--text-xs)', padding: '10px 14px', borderBottom: '2px solid var(--border)', background: 'var(--surface)' };
   const tdSt = { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', color: 'var(--text)' };
@@ -544,16 +569,125 @@ export function PageRooms() {
               </table>
             )}
 
-            {/* 입실율 - 층별 SVG */}
+            {/* 입실율 - 층별 SVG + 호실 명단 */}
             {detailMain === '입실율' && detailFloor && (() => {
               const floorAsg = filteredAssignments.filter(r => r.room_no[0] === detailFloor);
               const roomCounts = floorAsg.reduce<Record<string, number>>((acc, r) => {
                 acc[r.room_no] = (acc[r.room_no] ?? 0) + 1; return acc;
               }, {});
               return (
-                <div style={{ padding: '16px 24px', minWidth: 560, maxWidth: 860, margin: '0 auto' }}>
-                  {detailFloor === '2' && <Floor2SVG roomCounts={roomCounts} />}
-                  {detailFloor === '3' && <Floor3SVG roomCounts={roomCounts} />}
+                <div style={{ padding: '16px 20px' }}>
+                  {/* 이름 검색 */}
+                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>이름 검색</span>
+                    <input
+                      value={nameSearch}
+                      onChange={e => { setNameSearch(e.target.value); setFloorSelectedRoom(null); }}
+                      placeholder="이름 입력 시 해당 호실이 강조됩니다"
+                      style={{ flex: 1, maxWidth: 280, padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 7, background: 'var(--bg)', color: 'var(--text)' }}
+                    />
+                    {nameSearch && (
+                      <button onClick={() => setNameSearch('')} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>지우기</button>
+                    )}
+                    {searchHighlightRooms && searchHighlightRooms.size > 0 && (
+                      <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 6, background: 'rgba(245,158,11,0.15)', color: '#d97706', fontWeight: 700 }}>
+                        {searchHighlightRooms.size}개 호실 강조
+                      </span>
+                    )}
+                    {searchHighlightRooms && searchHighlightRooms.size === 0 && nameSearchTrim && (
+                      <span style={{ fontSize: 11, color: 'var(--text-xs)' }}>검색 결과 없음</span>
+                    )}
+                  </div>
+                  {/* SVG + 명단 패널 */}
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                    <div style={{ flex: '1 1 0', minWidth: 0 }}>
+                      <div style={{ minWidth: 420 }}>
+                        {detailFloor === '2' && (
+                          <Floor2SVG
+                            roomCounts={roomCounts}
+                            onRoomClick={room => setFloorSelectedRoom(prev => prev === room ? null : room)}
+                            onRoomHover={setFloorHoveredRoom}
+                            hoveredRoom={floorHoveredRoom}
+                            selectedRoom={floorSelectedRoom}
+                            highlightedRooms={searchHighlightRooms}
+                          />
+                        )}
+                        {detailFloor === '3' && (
+                          <Floor3SVG
+                            roomCounts={roomCounts}
+                            onRoomClick={room => setFloorSelectedRoom(prev => prev === room ? null : room)}
+                            onRoomHover={setFloorHoveredRoom}
+                            hoveredRoom={floorHoveredRoom}
+                            selectedRoom={floorSelectedRoom}
+                            highlightedRooms={searchHighlightRooms}
+                          />
+                        )}
+                        <p style={{ fontSize: 11, color: 'var(--text-xs)', marginTop: 6, textAlign: 'center' }}>
+                          호실을 클릭하면 오른쪽에 입실 명단이 표시됩니다
+                        </p>
+                      </div>
+                    </div>
+                    {/* 호실 명단 패널 */}
+                    <div style={{
+                      width: 260, flexShrink: 0,
+                      background: 'var(--bg)', border: '1px solid var(--border)',
+                      borderRadius: 10, overflow: 'hidden',
+                      transition: 'opacity 0.2s',
+                      opacity: floorSelectedRoom ? 1 : 0.4,
+                    }}>
+                      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', background: floorSelectedRoom ? 'var(--accent-bg)' : 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: floorSelectedRoom ? 'var(--accent)' : 'var(--text-muted)' }}>
+                          {floorSelectedRoom ? `${floorSelectedRoom}호 입실 명단` : '호실을 클릭하세요'}
+                        </span>
+                        {floorSelectedRoom && (
+                          <button onClick={() => setFloorSelectedRoom(null)} style={{ fontSize: 11, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-xs)', padding: '2px 4px' }}>✕</button>
+                        )}
+                      </div>
+                      {floorSelectedRoom && (
+                        <div style={{ padding: '8px 0' }}>
+                          {selectedRoomOccupants.length === 0 ? (
+                            <div style={{ padding: '16px 14px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>입실자 없음 (공실)</div>
+                          ) : (
+                            selectedRoomOccupants.map((p, i) => (
+                              <div key={`${p.seq}-${i}`} style={{
+                                padding: '8px 14px',
+                                borderBottom: i < selectedRoomOccupants.length - 1 ? '1px solid var(--border)' : 'none',
+                                background: nameSearchTrim && (p.name ?? '').includes(nameSearchTrim) ? 'rgba(245,158,11,0.10)' : 'transparent',
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                                    {p.name ?? '(이름 없음)'}
+                                  </span>
+                                  {p.gender && (
+                                    <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: p.gender === '남' ? 'rgba(59,130,246,0.12)' : 'rgba(236,72,153,0.12)', color: p.gender === '남' ? '#3b82f6' : '#ec4899' }}>
+                                      {p.gender}
+                                    </span>
+                                  )}
+                                  <span style={{ fontSize: 10, color: 'var(--text-xs)', marginLeft: 'auto' }}>침대 {p.seq}</span>
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                  {[p.school, p.grade ? `${p.grade}학년` : null].filter(Boolean).join(' · ') || '학교 정보 없음'}
+                                </div>
+                                {(p.check_in_ymd || p.check_out_ymd) && (
+                                  <div style={{ fontSize: 10, color: 'var(--text-xs)', marginTop: 2 }}>
+                                    {p.check_in_ymd} ~ {p.check_out_ymd}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                          <div style={{ padding: '6px 14px', borderTop: '1px solid var(--border)', background: 'var(--surface)', fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>
+                            {selectedRoomOccupants.length}명 / {roomCounts[floorSelectedRoom] ?? 0}명
+                          </div>
+                        </div>
+                      )}
+                      {!floorSelectedRoom && (
+                        <div style={{ padding: '24px 14px', fontSize: 12, color: 'var(--text-xs)', textAlign: 'center' }}>
+                          배치도에서 호실을<br/>클릭하세요
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               );
             })()}
