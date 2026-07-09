@@ -238,8 +238,6 @@ export function PageRooms() {
     const usedSeqs = new Set(assignmentsRaw.filter(r => r.room_no === room_no && r.year === year && r.half_year === halfYear && r.chasu === chasu).map(r => r.seq));
     return allSeqs.find(s => !usedSeqs.has(s)) ?? null;
   };
-  const pkQuery = (r: AssignmentRow) =>
-    `year=eq.${r.year}&half_year=eq.${encodeURIComponent(r.half_year)}&room_no=eq.${r.room_no}&chasu=eq.${r.chasu}&seq=eq.${r.seq}`;
 
   const handleDelete = async (row: AssignmentRow) => {
     setSaving(true);
@@ -537,10 +535,14 @@ export function PageRooms() {
             </div>
           </div>
 
-          <div style={{ overflowX: 'auto', maxHeight: 400, overflowY: 'auto' as const }}>
+          <div style={{
+            overflowX: 'auto',
+            maxHeight: (detailMain === '입실율' || detailMain === '객실 가동율') && detailFloor ? 'none' : 400,
+            overflowY: (detailMain === '입실율' || detailMain === '객실 가동율') && detailFloor ? 'visible' : 'auto' as const,
+          }}>
             {/* 객실 가동율 - 층별 배치도 */}
             {detailMain === '객실 가동율' && detailFloor && (
-              <div style={{ padding: '16px 24px', minWidth: 560, maxWidth: 860, margin: '0 auto' }}>
+              <div style={{ padding: '16px 24px' }}>
                 {detailFloor === '2' && <Floor2SVG singleDot occupiedRooms={[...new Set(filteredAssignments.filter(r => r.room_no[0] === '2').map(r => r.room_no))]} />}
                 {detailFloor === '3' && <Floor3SVG singleDot occupiedRooms={[...new Set(filteredAssignments.filter(r => r.room_no[0] === '3').map(r => r.room_no))]} />}
               </div>
