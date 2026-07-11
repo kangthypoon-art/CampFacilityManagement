@@ -19,7 +19,21 @@ interface CategoryPriceRow {
   is_active:     string;
 }
 
-type Tab = 'room_master' | 'category_price';
+interface RoomAssignmentRow {
+  year:          number;
+  half_year:     string;
+  room_no:       string;
+  chasu:         string;
+  seq:           number;
+  school:        string;
+  name:          string;
+  grade:         number;
+  gender:        string;
+  check_in_ymd:  string;
+  check_out_ymd: string;
+}
+
+type Tab = 'room_master' | 'room_assignment' | 'category_price';
 
 // ── 공통 스타일 ───────────────────────────────────────────────────────────────
 
@@ -412,6 +426,408 @@ function RoomMasterTab() {
   );
 }
 
+// ── room_assignment 탭 ───────────────────────────────────────────────────────
+
+const RA_EMPTY: RoomAssignmentRow = {
+  year: new Date().getFullYear(), half_year: '', room_no: '', chasu: '', seq: 1,
+  school: '', name: '', grade: 1, gender: '', check_in_ymd: '', check_out_ymd: '',
+};
+
+function RoomAssignmentTab() {
+  const [meta,        setMeta]        = useState<{ year: number; half_year: string }[]>([]);
+  const [rows,        setRows]        = useState<RoomAssignmentRow[]>([]);
+  const [loading,     setLoading]     = useState(false);
+  const [editIdx,     setEditIdx]     = useState<number | null>(null);
+  const [draft,       setDraft]       = useState<RoomAssignmentRow | null>(null);
+  const [saving,      setSaving]      = useState(false);
+  const [errMsg,      setErrMsg]      = useState('');
+  const [selected,    setSelected]    = useState<Set<string>>(new Set());
+  const [newRow,      setNewRow]      = useState<RoomAssignmentRow | null>(null);
+  const [savingNew,   setSavingNew]   = useState(false);
+  const [deleting,    setDeleting]    = useState(false);
+  const [filterYear,  setFilterYear]  = useState('');
+  const [filterHalf,  setFilterHalf]  = useState('');
+  const [filterRoom,  setFilterRoom]  = useState('');
+  const [filterChasu, setFilterChasu] = useState('');
+
+  const supaUrl = '/api/supabase/rest/v1';
+  const hdr = { 'Content-Type': 'application/json' };
+
+  const pkKey = (r: RoomAssignmentRow) => `${r.year}|${r.half_year}|${r.room_no}|${r.chasu}|${r.seq}`;
+  const pkUrl = (r: RoomAssignmentRow) =>
+    `${supaUrl}/room_assignment`
+    + `?year=eq.${r.year}`
+    + `&half_year=eq.${encodeURIComponent(r.half_year)}`
+    + `&room_no=eq.${encodeURIComponent(r.room_no)}`
+    + `&chasu=eq.${encodeURIComponent(r.chasu)}`
+    + `&seq=eq.${r.seq}`;
+
+  useEffect(() => {
+    fetch(`${supaUrl}/room_assignment?select=year,half_year&order=year,half_year`, { headers: hdr })
+      .then(r => r.json())
+      .then((data: { year: unknown; half_year: unknown }[]) => {
+        if (!Array.isArray(data)) return;
+        const seen = new Set<string>();
+        const unique: { year: number; half_year: string }[] = [];
+        for (const d of data) {
+          const y = Number(d.year); const h = String(d.half_year ?? '');
+          const k = `${y}|${h}`;
+          if (!seen.has(k)) { seen.add(k); unique.push({ year: y, half_year: h }); }
+        }
+        setMeta(unique);
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const load = useCallback(async (year = filterYear, half = filterHalf) => {
+    if (!year || !half) return;
+    setLoading(true); setErrMsg(''); setEditIdx(null); setNewRow(null);
+    try {
+      const res = await fetch(
+        `${supaUrl}/room_assignment?year=eq.${year}&half_year=eq.${encodeURIComponent(half)}&select=*&order=room_no,chasu,seq`,
+        { headers: hdr }
+      );
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data.map((r: Record<string, unknown>) => ({
+        year:          Number(r.year),
+        half_year:     String(r.half_year ?? ''),
+        room_no:       String(r.room_no ?? ''),
+        chasu:         String(r.chasu ?? ''),
+        seq:           Number(r.seq ?? 0),
+        school:        String(r.school ?? ''),
+        name:          String(r.name ?? ''),
+        grade:         Number(r.grade ?? 0),
+        gender:        String(r.gender ?? ''),
+        check_in_ymd:  String(r.check_in_ymd ?? ''),
+        check_out_ymd: String(r.check_out_ymd ?? ''),
+      })) : []);
+      setSelected(new Set());
+    } catch { setErrMsg('데이터 로드 실패'); }
+    finally { setLoading(false); }
+  }, [filterYear, filterHalf]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const startEdit = (i: number) => { setEditIdx(i); setDraft({ ...rows[i] }); setErrMsg(''); setNewRow(null); };
+  const cancelEdit = () => { setEditIdx(null); setDraft(null); };
+
+  const saveEdit = async () => {
+    if (!draft) return;
+    const orig = rows[editIdx!];
+    setSaving(true); setErrMsg('');
+    try {
+      const del = await fetch(pkUrl(orig), { method: 'DELETE', headers: hdr });
+      if (!del.ok) throw new Error(`삭제 실패: HTTP ${del.status}`);
+      const ins = await fetch(`${supaUrl}/room_assignment`, {
+        method: 'POST', headers: { ...hdr, Prefer: 'return=minimal' },
+        body: JSON.stringify(draft),
+      });
+      if (!ins.ok) {
+        const b = await ins.json().catch(() => ({}));
+        throw new Error((b as { message?: string; error?: string })?.message ?? (b as { error?: string })?.error ?? `저장 실패: HTTP ${ins.status}`);
+      }
+      setEditIdx(null); setDraft(null);
+      await load();
+    } catch (e) { setErrMsg((e as Error).message); }
+    finally { setSaving(false); }
+  };
+
+  const deleteRow = async (i: number) => {
+    const r = rows[i];
+    if (!confirm(`[${r.room_no}호 ${r.chasu} ${r.name}] 행을 삭제하시겠습니까?`)) return;
+    setErrMsg('');
+    try {
+      const res = await fetch(pkUrl(r), { method: 'DELETE', headers: hdr });
+      if (!res.ok) throw new Error(`삭제 실패: HTTP ${res.status}`);
+      await load();
+    } catch (e) { setErrMsg((e as Error).message); }
+  };
+
+  const deleteSelected = async () => {
+    if (!confirm(`선택한 ${selected.size}개 행을 삭제하시겠습니까?`)) return;
+    setDeleting(true); setErrMsg('');
+    try {
+      for (const key of selected) {
+        const [yr, hy, rm, ch, sq] = key.split('|');
+        await fetch(
+          `${supaUrl}/room_assignment?year=eq.${yr}&half_year=eq.${encodeURIComponent(hy)}&room_no=eq.${encodeURIComponent(rm)}&chasu=eq.${encodeURIComponent(ch)}&seq=eq.${sq}`,
+          { method: 'DELETE', headers: hdr }
+        );
+      }
+      await load();
+    } catch (e) { setErrMsg((e as Error).message); }
+    finally { setDeleting(false); }
+  };
+
+  const saveNewRow = async () => {
+    if (!newRow) return;
+    setSavingNew(true); setErrMsg('');
+    try {
+      const res = await fetch(`${supaUrl}/room_assignment`, {
+        method: 'POST', headers: { ...hdr, Prefer: 'return=minimal' },
+        body: JSON.stringify(newRow),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error((b as { message?: string; error?: string })?.message ?? (b as { error?: string })?.error ?? `저장 실패: HTTP ${res.status}`);
+      }
+      setNewRow(null);
+      await load();
+    } catch (e) { setErrMsg((e as Error).message); }
+    finally { setSavingNew(false); }
+  };
+
+  const exportCsv = () => {
+    const cols: (keyof RoomAssignmentRow)[] = ['year', 'half_year', 'room_no', 'chasu', 'seq', 'school', 'name', 'grade', 'gender', 'check_in_ymd', 'check_out_ymd'];
+    const dataRows = visible.map(r => cols.map(c => `"${String(r[c]).replace(/"/g, '""')}"`).join(','));
+    downloadCsv('room_assignment.csv', cols, dataRows);
+  };
+
+  const years   = [...new Set(meta.map(m => m.year))].sort((a, b) => b - a);
+  const halves  = [...new Set(meta.filter(m => !filterYear || m.year === Number(filterYear)).map(m => m.half_year))].sort();
+  const rooms   = [...new Set(rows.map(r => r.room_no))].sort((a, b) => Number(a) - Number(b));
+  const chasues = [...new Set(rows.map(r => r.chasu))].sort();
+  const schools = [...new Set(rows.map(r => r.school))].filter(Boolean).sort();
+
+  const visible = rows.filter(r =>
+    (!filterRoom  || r.room_no === filterRoom) &&
+    (!filterChasu || r.chasu   === filterChasu)
+  );
+  const allVisibleSelected = visible.length > 0 && visible.every(r => selected.has(pkKey(r)));
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) setSelected(new Set());
+    else setSelected(new Set(visible.map(pkKey)));
+  };
+  const toggleSelect = (r: RoomAssignmentRow) => {
+    const key = pkKey(r);
+    setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  };
+
+  const noQuery = !filterYear || !filterHalf;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 조회 조건 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: 'var(--bg)', padding: '12px 16px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>년도 *</label>
+          <select value={filterYear} onChange={e => { setFilterYear(e.target.value); setFilterHalf(''); setFilterRoom(''); setFilterChasu(''); setRows([]); }} style={selSt}>
+            <option value="">선택</option>
+            {years.map(y => <option key={y} value={y}>{y}년</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>반기 *</label>
+          <select value={filterHalf} onChange={e => { setFilterHalf(e.target.value); setFilterRoom(''); setFilterChasu(''); setRows([]); }} disabled={!filterYear} style={selSt}>
+            <option value="">선택</option>
+            {halves.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>객실번호</label>
+          <select value={filterRoom} onChange={e => { setFilterRoom(e.target.value); setEditIdx(null); setSelected(new Set()); }} disabled={rows.length === 0} style={selSt}>
+            <option value="">전체</option>
+            {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>차수</label>
+          <select value={filterChasu} onChange={e => { setFilterChasu(e.target.value); setEditIdx(null); setSelected(new Set()); }} disabled={rows.length === 0} style={selSt}>
+            <option value="">전체</option>
+            {chasues.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <button onClick={() => load(filterYear, filterHalf)} disabled={noQuery || loading} style={btn(noQuery || loading ? '#94a3b8' : '#0D9488')}>
+          {loading ? '조회 중…' : '조회'}
+        </button>
+      </div>
+
+      {/* 툴바 */}
+      {rows.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {visible.length}건 / 전체 {rows.length}건
+          </span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {selected.size > 0 && (
+              <button style={btn('#ef4444')} onClick={deleteSelected} disabled={deleting}>
+                {deleting ? '삭제 중…' : `선택 삭제 (${selected.size})`}
+              </button>
+            )}
+            <button style={btn('#3b82f6', true)} onClick={() => { setNewRow({ ...RA_EMPTY, year: Number(filterYear), half_year: filterHalf }); setEditIdx(null); }}>+ 행 추가</button>
+            <button style={btn('#6b7280', true)} onClick={exportCsv}>CSV 내보내기</button>
+          </div>
+        </div>
+      )}
+
+      {errMsg && (
+        <div style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 7, fontSize: 12, color: '#DC2626' }}>
+          {errMsg}
+        </div>
+      )}
+
+      {noQuery && (
+        <div style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+          년도와 반기를 선택한 후 <strong>조회</strong> 버튼을 클릭하세요.
+        </div>
+      )}
+
+      {!noQuery && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 480px)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 1100 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thSt, width: 36, textAlign: 'center', padding: '10px 8px' }}>
+                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} style={{ cursor: 'pointer' }} />
+                  </th>
+                  <th style={{ ...thSt, textAlign: 'center' }}>년도</th>
+                  <th style={thSt}>반기</th>
+                  <th style={thSt}>객실</th>
+                  <th style={thSt}>차수</th>
+                  <th style={{ ...thSt, textAlign: 'center' }}>seq</th>
+                  <th style={thSt}>학교</th>
+                  <th style={thSt}>이름</th>
+                  <th style={{ ...thSt, textAlign: 'center' }}>학년</th>
+                  <th style={{ ...thSt, textAlign: 'center' }}>성별</th>
+                  <th style={{ ...thSt, textAlign: 'center' }}>입실일</th>
+                  <th style={{ ...thSt, textAlign: 'center' }}>퇴실일</th>
+                  <th style={{ ...thSt, textAlign: 'center' }}>작업</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((row, i) => {
+                  const origIdx = rows.indexOf(row);
+                  const isEdit  = editIdx === origIdx;
+                  const isSel   = selected.has(pkKey(row));
+                  return (
+                    <tr key={pkKey(row)} style={{ background: isSel ? 'rgba(59,130,246,0.06)' : i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.012)' }}>
+                      <td style={{ ...tdSt, textAlign: 'center', padding: '7px 8px' }}>
+                        <input type="checkbox" checked={isSel} onChange={() => toggleSelect(row)} style={{ cursor: 'pointer' }} />
+                      </td>
+                      {isEdit ? (
+                        <>
+                          <td style={{ ...tdSt, textAlign: 'center' }}><input style={{ ...inputSt, width: 55, textAlign: 'center' }} type="number" value={draft!.year} onChange={e => setDraft(d => ({ ...d!, year: Number(e.target.value) }))} /></td>
+                          <td style={tdSt}><input style={{ ...inputSt, width: 65 }} value={draft!.half_year} onChange={e => setDraft(d => ({ ...d!, half_year: e.target.value }))} /></td>
+                          <td style={tdSt}><input style={{ ...inputSt, width: 55 }} value={draft!.room_no} onChange={e => setDraft(d => ({ ...d!, room_no: e.target.value }))} /></td>
+                          <td style={tdSt}><input style={{ ...inputSt, width: 55 }} value={draft!.chasu} onChange={e => setDraft(d => ({ ...d!, chasu: e.target.value }))} /></td>
+                          <td style={{ ...tdSt, textAlign: 'center' }}><input style={{ ...inputSt, width: 45, textAlign: 'center' }} type="number" value={draft!.seq} onChange={e => setDraft(d => ({ ...d!, seq: Number(e.target.value) }))} /></td>
+                          <td style={tdSt}><input list="ra-schools" style={{ ...inputSt, width: 100 }} value={draft!.school} onChange={e => setDraft(d => ({ ...d!, school: e.target.value }))} /></td>
+                          <td style={tdSt}><input style={{ ...inputSt, width: 70 }} value={draft!.name} onChange={e => setDraft(d => ({ ...d!, name: e.target.value }))} /></td>
+                          <td style={{ ...tdSt, textAlign: 'center' }}><input style={{ ...inputSt, width: 45, textAlign: 'center' }} type="number" value={draft!.grade} onChange={e => setDraft(d => ({ ...d!, grade: Number(e.target.value) }))} /></td>
+                          <td style={{ ...tdSt, textAlign: 'center' }}>
+                            <select style={{ ...inputSt, width: 55 }} value={draft!.gender} onChange={e => setDraft(d => ({ ...d!, gender: e.target.value }))}>
+                              <option value="">-</option>
+                              <option value="남">남</option>
+                              <option value="여">여</option>
+                            </select>
+                          </td>
+                          <td style={{ ...tdSt, textAlign: 'center' }}><input style={{ ...inputSt, width: 85, textAlign: 'center' }} value={draft!.check_in_ymd} onChange={e => setDraft(d => ({ ...d!, check_in_ymd: e.target.value }))} placeholder="YYYYMMDD" /></td>
+                          <td style={{ ...tdSt, textAlign: 'center' }}><input style={{ ...inputSt, width: 85, textAlign: 'center' }} value={draft!.check_out_ymd} onChange={e => setDraft(d => ({ ...d!, check_out_ymd: e.target.value }))} placeholder="YYYYMMDD" /></td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ ...tdSt, textAlign: 'center' }}>{row.year}</td>
+                          <td style={tdSt}>{row.half_year}</td>
+                          <td style={{ ...tdSt, fontWeight: 600 }}>{row.room_no}호</td>
+                          <td style={tdSt}>{row.chasu}</td>
+                          <td style={{ ...tdSt, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>{row.seq}</td>
+                          <td style={tdSt}>{row.school}</td>
+                          <td style={{ ...tdSt, fontWeight: 600 }}>{row.name}</td>
+                          <td style={{ ...tdSt, textAlign: 'center' }}>{row.grade}학년</td>
+                          <td style={{ ...tdSt, textAlign: 'center' }}>
+                            <span style={{ padding: '1px 7px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: row.gender === '남' ? 'rgba(59,130,246,0.12)' : row.gender === '여' ? 'rgba(244,114,182,0.15)' : 'transparent', color: row.gender === '남' ? '#2563eb' : row.gender === '여' ? '#db2777' : 'var(--text)' }}>{row.gender || '-'}</span>
+                          </td>
+                          <td style={{ ...tdSt, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{row.check_in_ymd}</td>
+                          <td style={{ ...tdSt, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{row.check_out_ymd}</td>
+                        </>
+                      )}
+                      <td style={{ ...tdSt, textAlign: 'center' }}>
+                        {isEdit ? (
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                            <button style={btn('#0D9488')} onClick={saveEdit} disabled={saving}>{saving ? '…' : '저장'}</button>
+                            <button style={btn('#6b7280', true)} onClick={cancelEdit}>취소</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                            <button style={btn('#3b82f6')} onClick={() => startEdit(origIdx)}>변경</button>
+                            <button style={btn('#ef4444')} onClick={() => deleteRow(origIdx)}>삭제</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {newRow && (
+                  <>
+                    <datalist id="ra-schools">{schools.map(s => <option key={s} value={s} />)}</datalist>
+                    <datalist id="ra-rooms">{rooms.map(r => <option key={r} value={r} />)}</datalist>
+                    <datalist id="ra-chasues">{chasues.map(c => <option key={c} value={c} />)}</datalist>
+                    <tr style={{ background: 'rgba(13,148,136,0.06)', outline: '2px solid var(--accent)', outlineOffset: -1 }}>
+                      <td style={{ ...tdSt, textAlign: 'center', padding: '7px 8px' }}>
+                        <span style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700 }}>NEW</span>
+                      </td>
+                      <td style={{ ...tdSt, textAlign: 'center' }}>
+                        <input style={{ ...inputSt, width: 55, textAlign: 'center' }} type="number" placeholder="년도" value={newRow.year || ''} onChange={e => setNewRow(r => ({ ...r!, year: Number(e.target.value) || 0 }))} />
+                      </td>
+                      <td style={tdSt}>
+                        <input style={{ ...inputSt, width: 65 }} placeholder="반기" value={newRow.half_year} onChange={e => setNewRow(r => ({ ...r!, half_year: e.target.value }))} />
+                      </td>
+                      <td style={tdSt}>
+                        <input list="ra-rooms" style={{ ...inputSt, width: 55 }} placeholder="객실" value={newRow.room_no} onChange={e => setNewRow(r => ({ ...r!, room_no: e.target.value }))} />
+                      </td>
+                      <td style={tdSt}>
+                        <input list="ra-chasues" style={{ ...inputSt, width: 55 }} placeholder="차수" value={newRow.chasu} onChange={e => setNewRow(r => ({ ...r!, chasu: e.target.value }))} />
+                      </td>
+                      <td style={{ ...tdSt, textAlign: 'center' }}>
+                        <input style={{ ...inputSt, width: 45, textAlign: 'center' }} type="number" placeholder="seq" value={newRow.seq || ''} onChange={e => setNewRow(r => ({ ...r!, seq: Number(e.target.value) || 1 }))} />
+                      </td>
+                      <td style={tdSt}>
+                        <input list="ra-schools" style={{ ...inputSt, width: 100 }} placeholder="학교" value={newRow.school} onChange={e => setNewRow(r => ({ ...r!, school: e.target.value }))} />
+                      </td>
+                      <td style={tdSt}>
+                        <input style={{ ...inputSt, width: 70 }} placeholder="이름" value={newRow.name} onChange={e => setNewRow(r => ({ ...r!, name: e.target.value }))} />
+                      </td>
+                      <td style={{ ...tdSt, textAlign: 'center' }}>
+                        <input style={{ ...inputSt, width: 45, textAlign: 'center' }} type="number" placeholder="학년" value={newRow.grade || ''} onChange={e => setNewRow(r => ({ ...r!, grade: Number(e.target.value) || 0 }))} />
+                      </td>
+                      <td style={{ ...tdSt, textAlign: 'center' }}>
+                        <select style={{ ...inputSt, width: 55 }} value={newRow.gender} onChange={e => setNewRow(r => ({ ...r!, gender: e.target.value }))}>
+                          <option value="">-</option>
+                          <option value="남">남</option>
+                          <option value="여">여</option>
+                        </select>
+                      </td>
+                      <td style={{ ...tdSt, textAlign: 'center' }}>
+                        <input style={{ ...inputSt, width: 85, textAlign: 'center' }} placeholder="YYYYMMDD" value={newRow.check_in_ymd} onChange={e => setNewRow(r => ({ ...r!, check_in_ymd: e.target.value }))} />
+                      </td>
+                      <td style={{ ...tdSt, textAlign: 'center' }}>
+                        <input style={{ ...inputSt, width: 85, textAlign: 'center' }} placeholder="YYYYMMDD" value={newRow.check_out_ymd} onChange={e => setNewRow(r => ({ ...r!, check_out_ymd: e.target.value }))} />
+                      </td>
+                      <td style={{ ...tdSt, textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                          <button style={btn('#0D9488')} onClick={saveNewRow} disabled={savingNew}>{savingNew ? '…' : '저장'}</button>
+                          <button style={btn('#6b7280', true)} onClick={() => { setNewRow(null); setErrMsg(''); }}>취소</button>
+                        </div>
+                      </td>
+                    </tr>
+                  </>
+                )}
+
+                {visible.length === 0 && !newRow && !loading && (
+                  <tr><td colSpan={13} style={{ ...tdSt, textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
+                    {rows.length === 0 ? '조회된 데이터가 없습니다.' : '필터 조건에 맞는 데이터가 없습니다.'}
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── category_price 탭 ─────────────────────────────────────────────────────────
 
 const CP_EMPTY: CategoryPriceRow = { category_code: 0, category_name: '', unit_price: 0, is_active: 'Y' };
@@ -676,8 +1092,9 @@ export function PageDataManage() {
   const [tab, setTab] = useState<Tab>('room_master');
 
   const TABS: { key: Tab; label: string; desc: string }[] = [
-    { key: 'room_master',    label: '객실 마스터',  desc: 'room_master 테이블' },
-    { key: 'category_price', label: '단가',         desc: 'category_price 테이블' },
+    { key: 'room_master',    label: '객실 마스터', desc: 'room_master 테이블' },
+    { key: 'room_assignment', label: '객실배정',   desc: 'room_assignment 테이블' },
+    { key: 'category_price', label: '단가',        desc: 'category_price 테이블' },
   ];
 
   return (
@@ -705,6 +1122,7 @@ export function PageDataManage() {
       </div>
 
       {tab === 'room_master'    && <RoomMasterTab />}
+      {tab === 'room_assignment' && <RoomAssignmentTab />}
       {tab === 'category_price' && <CategoryPriceTab />}
     </div>
   );
