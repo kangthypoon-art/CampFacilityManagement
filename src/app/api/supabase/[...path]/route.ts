@@ -12,9 +12,18 @@ const pool = new Pool({
 
 const TABLE_WHITELIST = new Set([
   'room_master', 'room_assignment', 'category_price', 'building_codes',
-  'laundry_target', 'laundry_settlement', 'users', 'repair_history',
-  'repair_list', 'room_master', 'room_assignment', 'building_codes',
+  'laundry_target', 'laundry_settlement', 'users', 'repair_history', 'repair_list',
 ]);
+
+// Primary key columns per table — used for ON CONFLICT upsert
+const TABLE_PK_COLS: Record<string, string[]> = {
+  room_assignment:    ['year', 'half_year', 'room_no', 'chasu', 'seq'],
+  room_master:        ['room_no', 'category_code', 'seq'],
+  building_codes:     ['code_type', 'code_value'],
+  laundry_target:     ['year', 'half_year', 'chasu', 'room_no'],
+  laundry_settlement: ['year', 'half_year', 'chasu'],
+  users:              ['email'],
+};
 
 function quoteId(name: string) {
   return '"' + name.replace(/"/g, '""') + '"';
@@ -72,13 +81,13 @@ function parseOrder(order: string | null) {
   }).filter(Boolean).join(', ');
 }
 
-function buildWhere(searchParams: URLSearchParams) {
+function buildWhere(searchParams: URLSearchParams, paramOffset = 0) {
   const clauses: string[] = [];
   const values: unknown[] = [];
 
   for (const [key, value] of searchParams.entries()) {
     if (['select', 'order', 'limit', 'offset'].includes(key)) continue;
-    const { clause, values: clauseValues } = parseFilter(key, value, values.length + 1);
+    const { clause, values: clauseValues } = parseFilter(key, value, paramOffset + values.length + 1);
     clauses.push(clause);
     values.push(...clauseValues);
   }
@@ -169,13 +178,32 @@ export async function POST(request: Request, { params }: RouteParams) {
     }).join(', ')})`;
   }).join(', ');
 
-  const sql = `INSERT INTO public.${quoteId(table)} (${columns}) VALUES ${paramSets}`;
+  const prefer = request.headers.get('Prefer') ?? '';
+  const wantUpsert = prefer.includes('resolution=merge-duplicates');
+  const pkCols = TABLE_PK_COLS[table];
+
+  let sql: string;
+  if (wantUpsert && pkCols) {
+    const pkSet = new Set(pkCols);
+    const nonPkKeys = keys.filter((k) => !pkSet.has(k));
+    const conflictCols = pkCols.map(quoteId).join(', ');
+    if (nonPkKeys.length === 0) {
+      sql = `INSERT INTO public.${quoteId(table)} (${columns}) VALUES ${paramSets} ON CONFLICT (${conflictCols}) DO NOTHING`;
+    } else {
+      const updateClauses = nonPkKeys.map((k) => `${quoteId(k)} = EXCLUDED.${quoteId(k)}`).join(', ');
+      sql = `INSERT INTO public.${quoteId(table)} (${columns}) VALUES ${paramSets} ON CONFLICT (${conflictCols}) DO UPDATE SET ${updateClauses}`;
+    }
+  } else {
+    sql = `INSERT INTO public.${quoteId(table)} (${columns}) VALUES ${paramSets}`;
+  }
+
   try {
     await executeQuery(sql, values);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Supabase proxy POST error:', error);
-    return NextResponse.json({ error: 'Insert failed' }, { status: 500 });
+    const msg = error instanceof Error ? error.message : 'Insert failed';
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
 
@@ -209,7 +237,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
   try {
     const url = new URL(request.url);
-    const { clause, values: whereValues } = buildWhere(url.searchParams);
+    const { clause, values: whereValues } = buildWhere(url.searchParams, values.length);
     if (!clause) {
       return NextResponse.json({ error: 'Update without filter is not allowed' }, { status: 400 });
     }
@@ -219,7 +247,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Supabase proxy PATCH error:', error);
-    return NextResponse.json({ error: 'Update failed' }, { status: 500 });
+    const msg = error instanceof Error ? error.message : 'Update failed';
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
 

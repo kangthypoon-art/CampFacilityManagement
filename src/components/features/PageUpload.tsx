@@ -199,36 +199,75 @@ export function PageUpload() {
     const url = '/api/supabase/rest/v1';
     const hdr = { 'Content-Type': 'application/json' };
 
-    // PK(year, half_year, room_no, chasu, seq) 기준 중복 제거 — 마지막 행 우선
-    const pkKey = (r: RoomRow) => `${r.year}|${r.half_year}|${r.room_no}|${r.chasu}|${r.seq}`;
-    const deduped = [...new Map(rows.map((r) => [pkKey(r), r])).values()];
-    const dupCount = rows.length - deduped.length;
-
     setSaveState('saving');
     setErrMsg('');
+
     try {
-      // Supabase REST는 한 번에 너무 많은 행을 보내면 중복 충돌 가능 → 청크로 나눠 전송
+      // ── 1. 파일 내 중복 감지 (PK 기준, 마지막 행 우선) ───────────────
+      const pkKey = (r: RoomRow) => `${r.year}|${r.half_year}|${r.room_no}|${r.chasu}|${r.seq}`;
+      const seenMap = new Map<string, RoomRow>();
+      const intraFileDups: RoomRow[] = [];
+      for (const r of rows) {
+        const k = pkKey(r);
+        if (seenMap.has(k)) intraFileDups.push(r);
+        else seenMap.set(k, r);
+      }
+      const deduped = [...seenMap.values()];
+
+      // ── 2. DB 기존 데이터 중복 확인 ──────────────────────────────────
+      const combos = [...new Set(deduped.map(r => `${r.year}|${r.half_year}`))];
+      const existingPkSet = new Set<string>();
+      for (const combo of combos) {
+        const [yr, hy] = combo.split('|');
+        const chk = await fetch(
+          `${url}/room_assignment?year=eq.${yr}&half_year=eq.${hy}&select=year,half_year,room_no,chasu,seq`,
+          { headers: hdr }
+        );
+        if (chk.ok) {
+          const existing = await chk.json() as { year: number; half_year: string; room_no: string; chasu: string; seq: number }[];
+          for (const r of existing)
+            existingPkSet.add(`${r.year}|${r.half_year}|${r.room_no}|${r.chasu}|${r.seq}`);
+        }
+      }
+      const dbDups = deduped.filter(r => existingPkSet.has(pkKey(r)));
+
+      // ── 3. 중복 경고 수집 ─────────────────────────────────────────────
+      const dupWarns: string[] = [];
+      if (intraFileDups.length > 0) {
+        const preview = intraFileDups.slice(0, 8)
+          .map(r => `${r.room_no}호 ${r.chasu}차 seq${r.seq}`).join(', ');
+        dupWarns.push(
+          `파일 내 중복 ${intraFileDups.length}건 제거(마지막 행 우선): ${preview}` +
+          (intraFileDups.length > 8 ? ` 외 ${intraFileDups.length - 8}건` : '')
+        );
+      }
+      if (dbDups.length > 0) {
+        const preview = dbDups.slice(0, 8)
+          .map(r => `${r.room_no}호 ${r.chasu}차 seq${r.seq}(${r.name})`).join(', ');
+        dupWarns.push(
+          `DB 기존 데이터 ${dbDups.length}건 덮어쓰기: ${preview}` +
+          (dbDups.length > 8 ? ` 외 ${dbDups.length - 8}건` : '')
+        );
+      }
+
+      // ── 4. 청크 저장 (upsert) ─────────────────────────────────────────
       const CHUNK = 100;
       for (let i = 0; i < deduped.length; i += CHUNK) {
         const chunk = deduped.slice(i, i + CHUNK);
         const res = await fetch(`${url}/room_assignment`, {
           method: 'POST',
-          headers: {
-            ...hdr,
-            Prefer: 'return=minimal,resolution=merge-duplicates',
-          },
+          headers: { ...hdr, Prefer: 'return=minimal,resolution=merge-duplicates' },
           body: JSON.stringify(chunk),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body?.message ?? `HTTP ${res.status}`);
+          throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}`);
         }
       }
+
       setSavedCount(deduped.length);
-      if (dupCount > 0) setErrMsg('');
       setSaveState('done');
-      if (dupCount > 0)
-        setSeqWarnings((w) => [`중복 행 ${dupCount}건 제거 후 저장`, ...w]);
+      if (dupWarns.length > 0) setSeqWarnings(w => [...dupWarns, ...w]);
     } catch (e) {
       setErrMsg((e as Error).message);
       setSaveState('error');
