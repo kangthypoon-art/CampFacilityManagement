@@ -356,8 +356,8 @@ export function PageLaundryTargets() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {saved && <span style={{ fontSize: 12, color: '#059669', fontWeight: 700 }}>✓ 저장완료</span>}
-              <button onClick={openAdd} disabled={addMode || historyExists}
-                style={{ padding: '7px 16px', fontSize: 13, fontWeight: 700, borderRadius: 7, border: 'none', cursor: (addMode || historyExists) ? 'default' : 'pointer', background: (addMode || historyExists) ? 'var(--border)' : '#8B5CF6', color: '#fff' }}>
+              <button onClick={openAdd} disabled={addMode}
+                style={{ padding: '7px 16px', fontSize: 13, fontWeight: 700, borderRadius: 7, border: 'none', cursor: addMode ? 'default' : 'pointer', background: addMode ? 'var(--border)' : '#8B5CF6', color: '#fff' }}>
                 ＋ 추가
               </button>
               <button
@@ -439,8 +439,8 @@ export function PageLaundryTargets() {
                           </>
                         ) : (
                           <>
-                            <button onClick={() => startEdit(i)} disabled={historyExists} style={{ ...btnEdit_, opacity: historyExists ? 0.4 : 1, cursor: historyExists ? 'default' : 'pointer' }}>변경</button>
-                            <button onClick={() => deleteRow(i)} disabled={historyExists} style={{ ...btnDel_, opacity: historyExists ? 0.4 : 1, cursor: historyExists ? 'default' : 'pointer' }}>삭제</button>
+                            <button onClick={() => startEdit(i)} style={btnEdit_}>변경</button>
+                            <button onClick={() => deleteRow(i)} style={btnDel_}>삭제</button>
                           </>
                         )}
                       </td>
