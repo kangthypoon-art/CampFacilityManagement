@@ -116,27 +116,7 @@ export function Header() {
 
         {/* 액션 버튼들 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* 검색 */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 7,
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 9,
-              padding: '7px 14px',
-              fontSize: 13,
-              color: 'var(--text-muted)',
-              cursor: 'text',
-              width: 210,
-            }}
-          >
-            <span>🔍</span>
-            <span>검색...</span>
-          </div>
-
-          {/* 테마 토글 */}
+{/* 테마 토글 */}
           <button
             onClick={toggle}
             title="테마 전환"
