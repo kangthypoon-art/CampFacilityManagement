@@ -53,10 +53,10 @@ export interface SettlementRow {
 }
 
 // ── 이미지 크기 (px → docx 변환, 96 DPI 기준: 1px = 9525 EMU) ───────────────
-// 열 너비 ≈ 2.1 inch = 202px. 마진 감안해 W=192px 고정 사용.
+// 2열 그리드: 본문 너비 7.5인치 / 2열 ≈ 3.4인치 = 330px
 
-const IMG_W = 192;
-const h = (canvasH: number, canvasW = 400) => Math.round(IMG_W * canvasH / canvasW);
+const IMG_W2 = 330;
+const h2 = (canvasH: number, canvasW = 400) => Math.round(IMG_W2 * canvasH / canvasW);
 
 // ── 테두리 헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -85,7 +85,25 @@ function imgPara(data: Uint8Array, width: number, height: number) {
   });
 }
 
-function emptyPara() { return new Paragraph({}); }
+// 2열 이미지 그리드 테이블 (각 행은 [imgData, pixelWidth, pixelHeight] 쌍의 배열)
+function imgGrid(rows: Array<[Uint8Array, number, number][]>): Table {
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: NONE_TABLE,
+    rows: rows.map(cols =>
+      new TableRow({
+        children: cols.map(([data, w, hh]) =>
+          new TableCell({
+            width: { size: Math.floor(100 / cols.length), type: WidthType.PERCENTAGE },
+            verticalAlign: VerticalAlign.TOP,
+            borders: NONE_CELL,
+            children: [imgPara(data, w, hh)],
+          }),
+        ),
+      }),
+    ),
+  });
+}
 
 // ── 정산 데이터 테이블 ────────────────────────────────────────────────────────
 
@@ -235,51 +253,20 @@ export async function generateWordReport(
     ),
   ]);
 
-  // ── 3열 레이아웃 테이블 ──
+  // ── 섹션별 레이아웃 ──
+  // 1) 객실관리: 2×2 그리드 (총 객실수 | 객실 가동율 / 총 입실인원수 | 입실율)
+  const roomGrid = imgGrid([
+    [[imgTotalRooms, IMG_W2, h2(130)], [imgOccupancy,   IMG_W2, h2(290)]],
+    [[imgTotalGuests, IMG_W2, h2(130)], [imgCheckIn,    IMG_W2, h2(270)]],
+  ]);
+
+  // 2) 세탁관리: 1×2 그리드 (항목별 건수 | 항목별 금액)
+  const laundryGrid = imgGrid([
+    [[imgCatCount, IMG_W2, h2(300)], [imgCatAmount, IMG_W2, h2(300)]],
+  ]);
+
+  // 3) 세탁비 정산 테이블
   const settTable = makeSettlementTable(settlement, room.year, room.half_year);
-
-  const col1 = new TableCell({
-    width: { size: 33, type: WidthType.PERCENTAGE },
-    verticalAlign: VerticalAlign.TOP,
-    borders: NONE_CELL,
-    children: [
-      heading('객실관리'),
-      imgPara(imgTotalRooms, IMG_W, h(130)),
-      imgPara(imgOccupancy,  IMG_W, h(290)),
-      imgPara(imgTotalGuests, IMG_W, h(130)),
-      imgPara(imgCheckIn,    IMG_W, h(270)),
-    ],
-  });
-
-  const col2 = new TableCell({
-    width: { size: 33, type: WidthType.PERCENTAGE },
-    verticalAlign: VerticalAlign.TOP,
-    borders: NONE_CELL,
-    children: [
-      heading('세탁관리'),
-      imgPara(imgCatCount,  IMG_W, h(300)),
-      imgPara(imgCatAmount, IMG_W, h(300)),
-    ],
-  });
-
-  const col3 = new TableCell({
-    width: { size: 34, type: WidthType.PERCENTAGE },
-    verticalAlign: VerticalAlign.TOP,
-    borders: NONE_CELL,
-    children: [
-      heading('세탁비 정산'),
-      emptyPara(),
-      settTable,
-    ],
-  });
-
-  const layoutTable = new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: NONE_TABLE,
-    rows: [
-      new TableRow({ children: [col1, col2, col3] }),
-    ],
-  });
 
   // ── 문서 조립 ──
   const periodLabel = `${room.year}년 ${room.half_year} ${room.chasu}차수`;
@@ -305,7 +292,12 @@ export async function generateWordReport(
             new TextRun({ text: '   출력일: ' + new Date().toLocaleDateString('ko-KR'), size: 18, color: '9ca3af' }),
           ],
         }),
-        layoutTable,
+        heading('객실관리', '0d9488', 24),
+        roomGrid,
+        heading('세탁관리', '3b82f6', 24),
+        laundryGrid,
+        heading('세탁비 정산', '1d4ed8', 24),
+        settTable,
       ],
     }],
   });
