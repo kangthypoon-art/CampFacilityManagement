@@ -609,17 +609,17 @@ function RoomAssignmentTab() {
           </select>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>객실번호</label>
-          <select value={filterRoom} onChange={e => { setFilterRoom(e.target.value); setEditIdx(null); setSelected(new Set()); }} style={selSt}>
-            <option value="">전체</option>
-            {rooms.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>차수</label>
           <select value={filterChasu} onChange={e => { setFilterChasu(e.target.value); setEditIdx(null); setSelected(new Set()); }} style={selSt}>
             <option value="">전체</option>
             {chasues.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>객실번호</label>
+          <select value={filterRoom} onChange={e => { setFilterRoom(e.target.value); setEditIdx(null); setSelected(new Set()); }} style={selSt}>
+            <option value="">전체</option>
+            {rooms.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -653,8 +653,8 @@ function RoomAssignmentTab() {
                 </th>
                 <th style={{ ...thSt, textAlign: 'center' }}>년도</th>
                 <th style={thSt}>반기</th>
-                <th style={thSt}>객실</th>
                 <th style={thSt}>차수</th>
+                <th style={thSt}>객실</th>
                 <th style={{ ...thSt, textAlign: 'center' }}>seq</th>
                 <th style={thSt}>학교</th>
                 <th style={thSt}>이름</th>
@@ -679,8 +679,8 @@ function RoomAssignmentTab() {
                       <>
                         <td style={{ ...tdSt, textAlign: 'center' }}><input style={{ ...inputSt, width: 55, textAlign: 'center' }} type="number" value={draft!.year} onChange={e => setDraft(d => ({ ...d!, year: Number(e.target.value) }))} /></td>
                         <td style={tdSt}><input style={{ ...inputSt, width: 65 }} value={draft!.half_year} onChange={e => setDraft(d => ({ ...d!, half_year: e.target.value }))} /></td>
-                        <td style={tdSt}><input style={{ ...inputSt, width: 55 }} value={draft!.room_no} onChange={e => setDraft(d => ({ ...d!, room_no: e.target.value }))} /></td>
                         <td style={tdSt}><input style={{ ...inputSt, width: 55 }} value={draft!.chasu} onChange={e => setDraft(d => ({ ...d!, chasu: e.target.value }))} /></td>
+                        <td style={tdSt}><input style={{ ...inputSt, width: 55 }} value={draft!.room_no} onChange={e => setDraft(d => ({ ...d!, room_no: e.target.value }))} /></td>
                         <td style={{ ...tdSt, textAlign: 'center' }}><input style={{ ...inputSt, width: 45, textAlign: 'center' }} type="number" value={draft!.seq} onChange={e => setDraft(d => ({ ...d!, seq: Number(e.target.value) }))} /></td>
                         <td style={tdSt}><input list="ra-schools" style={{ ...inputSt, width: 100 }} value={draft!.school} onChange={e => setDraft(d => ({ ...d!, school: e.target.value }))} /></td>
                         <td style={tdSt}><input style={{ ...inputSt, width: 70 }} value={draft!.name} onChange={e => setDraft(d => ({ ...d!, name: e.target.value }))} /></td>
@@ -699,8 +699,8 @@ function RoomAssignmentTab() {
                       <>
                         <td style={{ ...tdSt, textAlign: 'center' }}>{row.year}</td>
                         <td style={tdSt}>{row.half_year}</td>
-                        <td style={{ ...tdSt, fontWeight: 600 }}>{row.room_no}호</td>
                         <td style={tdSt}>{row.chasu}</td>
+                        <td style={{ ...tdSt, fontWeight: 600 }}>{row.room_no}호</td>
                         <td style={{ ...tdSt, textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>{row.seq}</td>
                         <td style={tdSt}>{row.school}</td>
                         <td style={{ ...tdSt, fontWeight: 600 }}>{row.name}</td>
@@ -745,10 +745,10 @@ function RoomAssignmentTab() {
                       <input style={{ ...inputSt, width: 65 }} placeholder="반기" value={newRow.half_year} onChange={e => setNewRow(r => ({ ...r!, half_year: e.target.value }))} />
                     </td>
                     <td style={tdSt}>
-                      <input list="ra-rooms" style={{ ...inputSt, width: 55 }} placeholder="객실" value={newRow.room_no} onChange={e => setNewRow(r => ({ ...r!, room_no: e.target.value }))} />
+                      <input list="ra-chasues" style={{ ...inputSt, width: 55 }} placeholder="차수" value={newRow.chasu} onChange={e => setNewRow(r => ({ ...r!, chasu: e.target.value }))} />
                     </td>
                     <td style={tdSt}>
-                      <input list="ra-chasues" style={{ ...inputSt, width: 55 }} placeholder="차수" value={newRow.chasu} onChange={e => setNewRow(r => ({ ...r!, chasu: e.target.value }))} />
+                      <input list="ra-rooms" style={{ ...inputSt, width: 55 }} placeholder="객실" value={newRow.room_no} onChange={e => setNewRow(r => ({ ...r!, room_no: e.target.value }))} />
                     </td>
                     <td style={{ ...tdSt, textAlign: 'center' }}>
                       <input style={{ ...inputSt, width: 45, textAlign: 'center' }} type="number" placeholder="seq" value={newRow.seq || ''} onChange={e => setNewRow(r => ({ ...r!, seq: Number(e.target.value) || 1 }))} />
