@@ -26,6 +26,12 @@ const INIT_FORM: FormState = {
   password: '', password_confirm: '', is_active: true,
 };
 
+async function sha256hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const buf  = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 const inputSt: React.CSSProperties = {
   width: '100%', padding: '8px 12px', fontSize: 13, borderRadius: 8,
   border: '1px solid var(--border)', background: 'var(--bg)',
@@ -114,7 +120,7 @@ export function PageUsers() {
       };
 
       if (form.password) {
-        body.password_hash = form.password;
+        body.password_hash = await sha256hex(form.password.trim());
       }
 
       if (modal === 'add') {
