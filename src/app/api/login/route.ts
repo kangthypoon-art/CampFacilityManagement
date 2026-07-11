@@ -14,14 +14,9 @@ function normalizeEmail(email: string): string {
 }
 
 function verifyPassword(inputPassword: string, storedHash?: string | null): boolean {
-  if (!storedHash) return false;
-  const trimmedInput = inputPassword.trim();
-  const trimmedStored = storedHash.trim();
-  if (!trimmedInput || !trimmedStored) return false;
-  if (trimmedStored === trimmedInput) return true;
-  if (trimmedStored.toLowerCase() === trimmedInput.toLowerCase()) return true;
-  const hashedInput = createHash('sha256').update(trimmedInput).digest('hex');
-  return trimmedStored.toLowerCase() === hashedInput;
+  if (!storedHash || !inputPassword) return false;
+  const hashed = createHash('sha256').update(inputPassword.trim()).digest('hex');
+  return storedHash.trim().toLowerCase() === hashed;
 }
 
 export async function POST(request: Request) {
