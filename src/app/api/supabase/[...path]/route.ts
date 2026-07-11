@@ -35,7 +35,9 @@ function validIdentifier(name: string) {
 }
 
 function parseFilter(key: string, rawValue: string, paramIndex: number) {
-  const [opAndPrefix, value] = rawValue.includes('.') ? rawValue.split('.', 2) : ['eq', rawValue];
+  const dotIdx = rawValue.indexOf('.');
+  const opAndPrefix = dotIdx !== -1 ? rawValue.slice(0, dotIdx) : 'eq';
+  const value = dotIdx !== -1 ? rawValue.slice(dotIdx + 1) : rawValue;
   const column = validIdentifier(key) ? quoteId(key) : null;
   if (!column) throw new Error(`Invalid filter column: ${key}`);
 
