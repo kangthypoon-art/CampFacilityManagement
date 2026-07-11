@@ -222,7 +222,7 @@ export function Header() {
             >
               {session?.user_name?.[0] ?? 'U'}
             </div>
-            <div style={{ lineHeight: 1.25, minWidth: 0 }}>
+            <div style={{ lineHeight: 1.25, minWidth: 0, textAlign: 'center' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap' }}>
                 {session?.user_name ?? '사용자'}
               </div>
