@@ -140,8 +140,19 @@ export function PageLaundryTargets() {
         { headers: hdr }
       );
       if (histRes.ok) {
-        const histData: LaundryRow[] = await histRes.json();
-        if (Array.isArray(histData) && histData.length > 0) {
+        const rawHist = await histRes.json();
+        if (Array.isArray(rawHist) && rawHist.length > 0) {
+          const histData: LaundryRow[] = rawHist.map((r: Record<string, unknown>) => ({
+            year:          Number(r.year),
+            half_year:     String(r.half_year ?? ''),
+            chasu:         String(r.chasu ?? ''),
+            room_no:       String(r.room_no ?? ''),
+            cover_count:   Number(r.cover_count  ?? 0),
+            pillow_count:  Number(r.pillow_count ?? 0),
+            duvet_count:   Number(r.duvet_count  ?? 0),
+            funnel_count:  Number(r.funnel_count ?? 0),
+            amount:        Number(r.amount       ?? 0),
+          }));
           setRows(histData);
           setHistoryExists(true);
           setFromHistory(true);
