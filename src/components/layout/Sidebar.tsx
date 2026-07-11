@@ -13,6 +13,7 @@ interface SubItemDef {
   page: PageKey;
   label: string;
   sub?: SubSubItemDef[];   // 3단계 서브 아이템
+  disabled?: boolean;
 }
 
 interface NavItemDef {
@@ -169,20 +170,22 @@ function SubItem({ page, label, isActive, onClick }: {
 }
 
 // 2단계 그룹 헤더 (자체 페이지 없이 토글만)
-function SubGroup({ label, isOpen, isChildActive, onToggle }: {
-  label: string; isOpen: boolean; isChildActive: boolean; onToggle: () => void;
+function SubGroup({ label, isOpen, isChildActive, onToggle, disabled = false }: {
+  label: string; isOpen: boolean; isChildActive: boolean; onToggle: () => void; disabled?: boolean;
 }) {
-  const active = isOpen || isChildActive;
+  const active = !disabled && (isOpen || isChildActive);
   return (
     <div
-      role="button" tabIndex={0}
-      onClick={onToggle}
-      onKeyDown={(e) => e.key === 'Enter' && onToggle()}
+      role="button" tabIndex={disabled ? -1 : 0}
+      onClick={disabled ? undefined : onToggle}
+      onKeyDown={(e) => !disabled && e.key === 'Enter' && onToggle()}
       style={{
         display: 'flex', alignItems: 'center',
-        padding: '7px 10px 7px 52px', borderRadius: 7, cursor: 'pointer',
+        padding: '7px 10px 7px 52px', borderRadius: 7,
+        cursor: disabled ? 'not-allowed' : 'pointer',
         color: active ? 'var(--accent)' : 'var(--text-muted)',
         fontSize: 13, fontWeight: active ? 600 : 500,
+        opacity: disabled ? 0.45 : 1,
         background: 'transparent',
         transition: 'all var(--t)', position: 'relative',
         margin: '1px 2px', whiteSpace: 'nowrap',
@@ -205,21 +208,23 @@ function SubGroup({ label, isOpen, isChildActive, onToggle }: {
 }
 
 // 3단계 아이템 (더 깊은 들여쓰기)
-function SubSubItem({ page, label, isActive, onClick }: {
-  page: PageKey; label: string; isActive: boolean; onClick: () => void;
+function SubSubItem({ page, label, isActive, onClick, disabled = false }: {
+  page: PageKey; label: string; isActive: boolean; onClick: () => void; disabled?: boolean;
 }) {
   return (
     <div
-      role="button" tabIndex={0}
+      role="button" tabIndex={disabled ? -1 : 0}
       data-testid={`nav-subsub-item-${page}`}
-      onClick={onClick}
-      onKeyDown={(e) => e.key === 'Enter' && onClick()}
+      onClick={disabled ? undefined : onClick}
+      onKeyDown={(e) => !disabled && e.key === 'Enter' && onClick()}
       style={{
         display: 'flex', alignItems: 'center',
-        padding: '6px 10px 6px 70px', borderRadius: 7, cursor: 'pointer',
-        color: isActive ? 'var(--accent)' : 'var(--text-muted)',
+        padding: '6px 10px 6px 70px', borderRadius: 7,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        color: disabled ? 'var(--text-xs)' : isActive ? 'var(--accent)' : 'var(--text-muted)',
         fontSize: 12.5, fontWeight: isActive ? 600 : 500,
-        background: isActive ? 'var(--accent-bg)' : 'transparent',
+        opacity: disabled ? 0.45 : 1,
+        background: isActive && !disabled ? 'var(--accent-bg)' : 'transparent',
         transition: 'all var(--t)', position: 'relative',
         margin: '1px 2px', whiteSpace: 'nowrap',
       }}
@@ -237,7 +242,15 @@ function SubSubItem({ page, label, isActive, onClick }: {
 export function Sidebar() {
   const { currentPage, roomsSubOpen, suppliesSubOpen, facilitiesSubOpen, dataRegSubOpen, navigateTo, toggleRooms, toggleSupplies, toggleFacilities, toggleDataReg } = useNavStore();
 
+  const [isAdmin, setIsAdmin] = useState(true);
   const [occupancy, setOccupancy] = useState<{ rate: string; occupied: number; total: number } | null>(null);
+
+  useEffect(() => {
+    try {
+      const session = JSON.parse(localStorage.getItem('sci_session') ?? '{}');
+      setIsAdmin(session.user_role === 'ADMIN');
+    } catch { setIsAdmin(false); }
+  }, []);
 
   useEffect(() => {
     const baseUrl = '/api/supabase/rest/v1';
@@ -304,8 +317,8 @@ export function Sidebar() {
                 {item.sub.map((sub) => {
                   // 그룹 헤더 (sub-sub 있는 경우)
                   if (sub.sub) {
-                    const isGroupChildActive = sub.sub.some(ss => ss.page === currentPage);
-                    const isGroupOpen = dataRegSubOpen;
+                    const isGroupChildActive = !sub.disabled && sub.sub.some(ss => ss.page === currentPage);
+                    const isGroupOpen = dataRegSubOpen && !sub.disabled;
                     return (
                       <div key={sub.page}>
                         <SubGroup
@@ -313,6 +326,7 @@ export function Sidebar() {
                           isOpen={isGroupOpen}
                           isChildActive={isGroupChildActive}
                           onToggle={toggleDataReg}
+                          disabled={sub.disabled}
                         />
                         <div style={{
                           display: 'grid',
@@ -327,6 +341,7 @@ export function Sidebar() {
                                 label={ss.label}
                                 isActive={currentPage === ss.page}
                                 onClick={() => navigateTo(ss.page)}
+                                disabled={sub.disabled}
                               />
                             ))}
                           </div>
@@ -368,10 +383,16 @@ export function Sidebar() {
         overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'thin',
       }}>
         <SectionLabel>메인</SectionLabel>
-        {renderItems(NAV_ITEMS)}
+        {renderItems(NAV_ITEMS.map(item =>
+          item.page === 'rooms' && item.sub
+            ? { ...item, sub: item.sub.map(s => s.page === 'data-registration' ? { ...s, disabled: !isAdmin } : s) }
+            : item
+        ))}
 
         <SectionLabel>관리</SectionLabel>
-        {renderItems(MANAGE_ITEMS)}
+        {renderItems(MANAGE_ITEMS.map(item =>
+          item.page === 'users' ? { ...item, disabled: !isAdmin } : item
+        ))}
 
         <SectionLabel>시스템</SectionLabel>
         {renderItems(SYSTEM_ITEMS)}
