@@ -3,7 +3,7 @@
 
 import {
   AlignmentType, BorderStyle, Document, ImageRun, Packer, Paragraph,
-  Table, TableCell, TableRow, TextRun, VerticalAlign, WidthType,
+  ShadingType, Table, TableCell, TableRow, TextRun, VerticalAlign, WidthType,
 } from 'docx';
 
 import {
@@ -60,10 +60,14 @@ const h = (canvasH: number, canvasW = 400) => Math.round(IMG_W * canvasH / canva
 
 // ── 테두리 헬퍼 ──────────────────────────────────────────────────────────────
 
-const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } as const;
-const THIN      = { style: BorderStyle.SINGLE, size: 1, color: '000000' } as const;
-const NONE_ALL  = { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideH: NO_BORDER, insideV: NO_BORDER };
-const THIN_ALL  = { top: THIN, bottom: THIN, left: THIN, right: THIN, insideH: THIN, insideV: THIN };
+const NO_BORDER  = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' } as const;
+const THIN       = { style: BorderStyle.SINGLE, size: 1, color: '000000' } as const;
+// ITableBordersOptions: insideHorizontal / insideVertical
+const NONE_TABLE = { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideHorizontal: NO_BORDER, insideVertical: NO_BORDER };
+const THIN_TABLE = { top: THIN, bottom: THIN, left: THIN, right: THIN, insideHorizontal: THIN, insideVertical: THIN };
+// ITableCellBorders: no inside properties
+const NONE_CELL  = { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER };
+const THIN_CELL  = { top: THIN, bottom: THIN, left: THIN, right: THIN };
 
 // ── 문단 헬퍼 ────────────────────────────────────────────────────────────────
 
@@ -89,25 +93,25 @@ function makeSettlementTable(rows: SettlementRow[], year: number, half_year: str
   const fmt = (n: number) => n.toLocaleString('ko-KR');
   const cellText = (text: string, bold = false, align: (typeof AlignmentType)[keyof typeof AlignmentType] = AlignmentType.CENTER) =>
     new TableCell({
-      borders: THIN_ALL,
+      borders: THIN_CELL,
       children: [
         new Paragraph({
           alignment: align,
-          spacing: { before: 20, after: 20 },
-          children: [new TextRun({ text, bold, size: 14 })],
+          spacing: { before: 40, after: 40 },
+          children: [new TextRun({ text, bold, size: 20 })],
         }),
       ],
     });
 
   const headerCells = ['차수', '객실', '커버', '배개', '이불', '발판', '금액(원)'].map(t =>
     new TableCell({
-      borders: THIN_ALL,
-      shading: { fill: '4472C4' },
+      borders: THIN_CELL,
+      shading: { fill: '4472C4', type: ShadingType.CLEAR },
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { before: 20, after: 20 },
-          children: [new TextRun({ text: t, bold: true, size: 14, color: 'FFFFFF' })],
+          spacing: { before: 40, after: 40 },
+          children: [new TextRun({ text: t, bold: true, size: 20, color: 'FFFFFF' })],
         }),
       ],
     }),
@@ -140,13 +144,13 @@ function makeSettlementTable(rows: SettlementRow[], year: number, half_year: str
 
   const totalCells = ['합계', '', String(totals.cover), String(totals.pillow), String(totals.duvet), String(totals.funnel), fmt(totals.amount)].map((t, i) =>
     new TableCell({
-      borders: THIN_ALL,
-      shading: { fill: '4472C4' },
+      borders: THIN_CELL,
+      shading: { fill: '4472C4', type: ShadingType.CLEAR },
       children: [
         new Paragraph({
           alignment: i === 6 ? AlignmentType.RIGHT : AlignmentType.CENTER,
-          spacing: { before: 20, after: 20 },
-          children: [new TextRun({ text: t, bold: true, size: 14, color: 'FFFFFF' })],
+          spacing: { before: 40, after: 40 },
+          children: [new TextRun({ text: t, bold: true, size: 20, color: 'FFFFFF' })],
         }),
       ],
     }),
@@ -158,13 +162,13 @@ function makeSettlementTable(rows: SettlementRow[], year: number, half_year: str
     children: [
       new TableCell({
         columnSpan: 7,
-        borders: THIN_ALL,
-        shading: { fill: 'EFF6FF' },
+        borders: THIN_CELL,
+        shading: { fill: 'EFF6FF', type: ShadingType.CLEAR },
         children: [
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { before: 30, after: 30 },
-            children: [new TextRun({ text: titleText, bold: true, size: 16, color: '1e40af' })],
+            spacing: { before: 40, after: 40 },
+            children: [new TextRun({ text: titleText, bold: true, size: 24, color: '1e40af' })],
           }),
         ],
       }),
@@ -173,7 +177,7 @@ function makeSettlementTable(rows: SettlementRow[], year: number, half_year: str
 
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: THIN_ALL,
+    borders: THIN_TABLE,
     rows: [
       titleRow,
       new TableRow({ children: headerCells }),
@@ -237,7 +241,7 @@ export async function generateWordReport(
   const col1 = new TableCell({
     width: { size: 33, type: WidthType.PERCENTAGE },
     verticalAlign: VerticalAlign.TOP,
-    borders: NONE_ALL,
+    borders: NONE_CELL,
     children: [
       heading('객실관리'),
       imgPara(imgTotalRooms, IMG_W, h(130)),
@@ -250,7 +254,7 @@ export async function generateWordReport(
   const col2 = new TableCell({
     width: { size: 33, type: WidthType.PERCENTAGE },
     verticalAlign: VerticalAlign.TOP,
-    borders: NONE_ALL,
+    borders: NONE_CELL,
     children: [
       heading('세탁관리'),
       imgPara(imgCatCount,  IMG_W, h(300)),
@@ -261,7 +265,7 @@ export async function generateWordReport(
   const col3 = new TableCell({
     width: { size: 34, type: WidthType.PERCENTAGE },
     verticalAlign: VerticalAlign.TOP,
-    borders: NONE_ALL,
+    borders: NONE_CELL,
     children: [
       heading('세탁비 정산'),
       emptyPara(),
@@ -271,7 +275,7 @@ export async function generateWordReport(
 
   const layoutTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: NONE_ALL,
+    borders: NONE_TABLE,
     rows: [
       new TableRow({ children: [col1, col2, col3] }),
     ],
