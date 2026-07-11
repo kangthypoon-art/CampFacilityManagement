@@ -8,7 +8,7 @@ import {
 
 import {
   CAT_COLORS, CAT_LABELS,
-  drawHBarChart, drawRingChart, drawStatCard, drawVBarChart,
+  drawHBarChart, drawRateCard, drawRingChart, drawStatCard, drawVBarChart,
 } from './reportCharts';
 
 // ── 타입 ─────────────────────────────────────────────────────────────────────
@@ -53,8 +53,11 @@ export interface SettlementRow {
 }
 
 // ── 이미지 크기 (px → docx 변환, 96 DPI 기준: 1px = 9525 EMU) ───────────────
-// 2열 그리드: 본문 너비 7.5인치 / 2열 ≈ 3.4인치 = 330px
+// 4열 카드: 본문 7.5인치 / 4열 ≈ 1.8인치 = 175px
+// 2열 차트: 본문 7.5인치 / 2열 ≈ 3.4인치 = 330px
 
+const IMG_W4 = 175;
+const h4 = (canvasH: number, canvasW = 400) => Math.round(IMG_W4 * canvasH / canvasW);
 const IMG_W2 = 330;
 const h2 = (canvasH: number, canvasW = 400) => Math.round(IMG_W2 * canvasH / canvasW);
 
@@ -215,15 +218,21 @@ export async function generateWordReport(
   // ── 차트 이미지 병렬 생성 ──
   const [
     imgTotalRooms,
-    imgOccupancy,
+    imgOccupancyCard,   // 컴팩트 비율 카드 (4열 상단 행)
+    imgOccupancy,       // 전체 도넛 차트  (2열 하단 행)
     imgTotalGuests,
-    imgCheckIn,
+    imgCheckInCard,     // 컴팩트 비율 카드 (4열 상단 행)
+    imgCheckIn,         // 전체 수평 막대  (2열 하단 행)
     imgCatCount,
     imgCatAmount,
   ] = await Promise.all([
     drawStatCard(
       '총 객실수', `${room.totalRooms}개`, '#0d9488',
       room.roomFloors.map(f => ({ floor: f.floor, count: f.count, unit: '개' })),
+    ),
+    drawRateCard(
+      '객실 가동율', room.occupancyRate,
+      room.occupancyFloors, '#0d9488',
     ),
     drawRingChart(
       room.occupancyRate, room.occupancyOccupied, room.occupancyTotal,
@@ -232,6 +241,10 @@ export async function generateWordReport(
     drawStatCard(
       '총 입실인원수', `${room.totalGuests}명`, '#3b82f6',
       room.guestFloors.map(f => ({ floor: f.floor, count: f.count, unit: '명' })),
+    ),
+    drawRateCard(
+      '입실율', room.checkInRate,
+      room.checkInFloors, '#f97316',
     ),
     drawHBarChart(
       room.checkInRate, room.checkInOccupied, room.checkInTotal,
@@ -254,13 +267,22 @@ export async function generateWordReport(
   ]);
 
   // ── 섹션별 레이아웃 ──
-  // 1) 객실관리: 2×2 그리드 (총 객실수 | 객실 가동율 / 총 입실인원수 | 입실율)
-  const roomGrid = imgGrid([
-    [[imgTotalRooms, IMG_W2, h2(130)], [imgOccupancy,   IMG_W2, h2(290)]],
-    [[imgTotalGuests, IMG_W2, h2(130)], [imgCheckIn,    IMG_W2, h2(270)]],
+  // 1a) 객실관리 상단: 4열 컴팩트 카드 (총 객실수 | 가동율 | 총 입실인원수 | 입실율)
+  const roomCardGrid = imgGrid([
+    [
+      [imgTotalRooms,    IMG_W4, h4(130)],
+      [imgOccupancyCard, IMG_W4, h4(130)],
+      [imgTotalGuests,   IMG_W4, h4(130)],
+      [imgCheckInCard,   IMG_W4, h4(130)],
+    ],
   ]);
 
-  // 2) 세탁관리: 1×2 그리드 (항목별 건수 | 항목별 금액)
+  // 1b) 객실관리 하단: 2열 상세 차트 (도넛 가동율 | 수평막대 입실율)
+  const roomChartGrid = imgGrid([
+    [[imgOccupancy, IMG_W2, h2(290)], [imgCheckIn, IMG_W2, h2(270)]],
+  ]);
+
+  // 2) 세탁관리: 2열 수직 막대 (항목별 건수 | 항목별 금액)
   const laundryGrid = imgGrid([
     [[imgCatCount, IMG_W2, h2(300)], [imgCatAmount, IMG_W2, h2(300)]],
   ]);
@@ -293,10 +315,11 @@ export async function generateWordReport(
           ],
         }),
         heading('객실관리', '0d9488', 24),
-        roomGrid,
-        heading('세탁관리', '3b82f6', 24),
+        roomCardGrid,
+        roomChartGrid,
+        heading('세탁관리-항목별', '3b82f6', 24),
         laundryGrid,
-        heading('세탁비 정산', '1d4ed8', 24),
+        heading('세탁비 정산 내역', '1d4ed8', 24),
         settTable,
       ],
     }],

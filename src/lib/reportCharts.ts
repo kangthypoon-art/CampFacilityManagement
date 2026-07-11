@@ -37,6 +37,49 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+// ─── 비율 카드 (400×130) — 가동율·입실율 등 퍼센트 지표 컴팩트 표기 ──────────
+
+export async function drawRateCard(
+  label: string,
+  rate: string,
+  floors: { floor: string; rate: string }[],
+  color: string,
+): Promise<Uint8Array> {
+  const W = 400, H = 130;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d')!;
+
+  ctx.fillStyle = '#f9fafb';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, W, 4);
+
+  ctx.fillStyle = MUTED;
+  ctx.font = '600 11px "Arial", sans-serif';
+  ctx.fillText(label.toUpperCase(), 14, 26);
+
+  ctx.fillStyle = color;
+  ctx.font = 'bold 26px "Arial", sans-serif';
+  ctx.fillText(rate, 14, 62);
+
+  let bx = 14;
+  for (const { floor, rate: r } of floors) {
+    ctx.font = 'bold 11px "Arial", sans-serif';
+    const text = `${floor} ${r}`;
+    const tw = ctx.measureText(text).width;
+    const bw = tw + 16, bh = 24;
+    ctx.fillStyle = hexToRgba(color, 0.16);
+    roundRect(ctx, bx, 82, bw, bh, 5);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.fillText(text, bx + 8, 82 + 16);
+    bx += bw + 7;
+  }
+
+  return canvasToUint8(cv);
+}
+
 // ─── 통계 카드 (400×130) ─────────────────────────────────────────────────────
 
 export async function drawStatCard(
