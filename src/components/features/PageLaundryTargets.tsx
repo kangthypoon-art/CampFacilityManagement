@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface LaundryRow {
   room_no: string;
@@ -40,6 +40,8 @@ export function PageLaundryTargets() {
   const [addMode,          setAddMode]          = useState(false);
   const [addDraft,         setAddDraft]         = useState<AddDraft>({ year: '', half_year: '', chasu: '', room_no: '', cover_count: '', pillow_count: '', duvet_count: '', funnel_count: '' });
   const [addCommit,        setAddCommit]        = useState<Set<string>>(new Set());
+  const [historyExists,    setHistoryExists]    = useState(false);
+  const [fromHistory,      setFromHistory]      = useState(false);
 
   const supaUrl = '/api/supabase/rest/v1';
   const hdr = { 'Content-Type': 'application/json' };
@@ -90,7 +92,8 @@ export function PageLaundryTargets() {
   useEffect(() => {
     if (selYear === null) return;
     const h = yearHalfMap[selYear] ?? [];
-    setHalves(h); setSelHalf(h[0] ?? ''); setRows([]); setSaved(false);
+    setHalves(h); setSelHalf(h[0] ?? '');
+    setRows([]); setSaved(false); setHistoryExists(false); setFromHistory(false);
   }, [selYear, yearHalfMap]);
 
   useEffect(() => {
@@ -99,38 +102,80 @@ export function PageLaundryTargets() {
     setChasues(c); setSelChasu(c[0] ?? '');
   }, [selHalf, selYear, yearHalfChasuMap]);
 
+  // 공통 추출 로직 (room_master + room_assignment 기반)
+  const runExtract = useCallback(async (year: number, half: string, chasu: string): Promise<LaundryRow[]> => {
+    const [masters, assignments] = await Promise.all([
+      fetch(`${supaUrl}/room_master?category_code=eq.1000&seq=eq.1&select=room_no,guest_count&order=room_no`, { headers: hdr }).then(r => r.json()),
+      fetch(`${supaUrl}/room_assignment?year=eq.${year}&half_year=eq.${encodeURIComponent(half)}&chasu=eq.${encodeURIComponent(chasu)}&select=room_no`, { headers: hdr }).then(r => r.json()),
+    ]) as [{ room_no: string; guest_count: number }[], { room_no: string }[]];
+
+    const roomList = masters.map((m: { room_no: string }) => m.room_no).sort();
+    const guestCountMap: Record<string, number> = {};
+    for (const { room_no, guest_count } of masters) guestCountMap[room_no] = guest_count ?? 0;
+
+    const assignedRooms = new Set(assignments.map((a: { room_no: string }) => a.room_no));
+    const duvetMap: Record<string, number> = {};
+    const pillowMap: Record<string, number> = {};
+    for (const { room_no } of assignments) {
+      duvetMap[room_no]  = (duvetMap[room_no]  ?? 0) + 1;
+      pillowMap[room_no] = (pillowMap[room_no] ?? 0) + 1;
+    }
+    const p1 = prices['1001'] ?? 0, p2 = prices['1002'] ?? 0, p3 = prices['1003'] ?? 0, p4 = prices['1004'] ?? 0;
+    return roomList.filter((room_no: string) => assignedRooms.has(room_no)).map((room_no: string) => {
+      const cover  = guestCountMap[room_no] ?? 0;
+      const pillow = pillowMap[room_no] ?? 0;
+      const duvet  = duvetMap[room_no]  ?? 0;
+      return { room_no, year, half_year: half, chasu, cover_count: cover, pillow_count: pillow, duvet_count: duvet, funnel_count: 1, amount: cover * p1 + pillow * p2 + duvet * p3 + 1 * p4 };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prices]);
+
+  // 대상 추출: laundry_history 먼저 확인 → 있으면 표시, 없으면 추출
   const generate = async () => {
     if (!selYear) return;
     setLoading(true); setError(null); setSaved(false); setEditingIdx(null); setAddMode(false);
     try {
-      const [masters, assignments] = await Promise.all([
-        fetch(`${supaUrl}/room_master?category_code=eq.1000&seq=eq.1&select=room_no,guest_count&order=room_no`, { headers: hdr }).then(r => r.json()),
-        fetch(`${supaUrl}/room_assignment?year=eq.${selYear}&half_year=eq.${encodeURIComponent(selHalf)}&chasu=eq.${encodeURIComponent(selChasu)}&select=room_no`, { headers: hdr }).then(r => r.json()),
-      ]) as [{ room_no: string; guest_count: number }[], { room_no: string }[]];
-
-      const roomList = masters.map(m => m.room_no).sort();
-      const guestCountMap: Record<string, number> = {};
-      for (const { room_no, guest_count } of masters) {
-        guestCountMap[room_no] = guest_count ?? 0;
+      const histRes = await fetch(
+        `${supaUrl}/laundry_history?year=eq.${selYear}&half_year=eq.${encodeURIComponent(selHalf)}&chasu=eq.${encodeURIComponent(selChasu)}&select=*&order=room_no`,
+        { headers: hdr }
+      );
+      if (histRes.ok) {
+        const histData: LaundryRow[] = await histRes.json();
+        if (Array.isArray(histData) && histData.length > 0) {
+          setRows(histData);
+          setHistoryExists(true);
+          setFromHistory(true);
+          return;
+        }
       }
-      const assignedRooms = new Set(assignments.map(a => a.room_no));
-      const duvetMap: Record<string, number> = {};
-      const pillowMap: Record<string, number> = {};
-      for (const { room_no } of assignments) {
-        duvetMap[room_no]  = (duvetMap[room_no]  ?? 0) + 1;
-        pillowMap[room_no] = (pillowMap[room_no] ?? 0) + 1;
-      }
-      const p1 = prices['1001'] ?? 0, p2 = prices['1002'] ?? 0, p3 = prices['1003'] ?? 0, p4 = prices['1004'] ?? 0;
-      setRows(roomList.filter(room_no => assignedRooms.has(room_no)).map(room_no => {
-        const cover  = guestCountMap[room_no] ?? 0;
-        const pillow = pillowMap[room_no] ?? 0;
-        const duvet  = duvetMap[room_no]  ?? 0;
-        return { room_no, year: selYear!, half_year: selHalf, chasu: selChasu, cover_count: cover, pillow_count: pillow, duvet_count: duvet, funnel_count: 1, amount: cover * p1 + pillow * p2 + duvet * p3 + 1 * p4 };
-      }));
+      // history 없음 → 신규 추출
+      setHistoryExists(false);
+      setFromHistory(false);
+      const extracted = await runExtract(selYear, selHalf, selChasu);
+      setRows(extracted);
     } catch { setError('데이터 조회 중 오류가 발생했습니다.'); }
     finally { setLoading(false); }
   };
 
+  // 초기화: laundry_history 삭제 → 재추출
+  const resetHistory = async () => {
+    if (!selYear) return;
+    setLoading(true); setError(null); setSaved(false); setEditingIdx(null); setAddMode(false);
+    try {
+      const delRes = await fetch(
+        `${supaUrl}/laundry_history?year=eq.${selYear}&half_year=eq.${encodeURIComponent(selHalf)}&chasu=eq.${encodeURIComponent(selChasu)}`,
+        { method: 'DELETE', headers: hdr }
+      );
+      if (!delRes.ok) throw new Error(`초기화 실패 (${delRes.status})`);
+      setHistoryExists(false);
+      setFromHistory(false);
+      const extracted = await runExtract(selYear, selHalf, selChasu);
+      setRows(extracted);
+    } catch (e) { setError(e instanceof Error ? e.message : '초기화 중 오류가 발생했습니다.'); }
+    finally { setLoading(false); }
+  };
+
+  // 확정: laundry_target + laundry_history 저장
   const save = async () => {
     if (!selYear || rows.length === 0) return;
     setSaving(true); setError(null);
@@ -146,20 +191,30 @@ export function PageLaundryTargets() {
           return;
         }
       }
-      const groups = new Map<string, LaundryRow[]>();
-      for (const r of rows) {
-        const k = `${r.year}||${r.half_year}||${r.chasu}`;
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k)!.push(r);
-      }
-      for (const group of groups.values()) {
-        const { year, half_year, chasu } = group[0];
-        const del = await fetch(`${supaUrl}/laundry_target?year=eq.${year}&half_year=eq.${encodeURIComponent(half_year)}&chasu=eq.${encodeURIComponent(chasu)}`, { method: 'DELETE', headers: hdr });
-        if (!del.ok) throw new Error(`삭제 실패 (${del.status}): ${await del.text()}`);
-        const body = group.map(({ room_no, cover_count, pillow_count, duvet_count, funnel_count, amount }) => ({ year, half_year, chasu, room_no, cover_count, pillow_count, duvet_count, funnel_count, amount }));
-        const ins = await fetch(`${supaUrl}/laundry_target`, { method: 'POST', headers: { ...hdr, Prefer: 'return=minimal' }, body: JSON.stringify(body) });
-        if (!ins.ok) throw new Error(`저장 실패 (${ins.status}): ${await ins.text()}`);
-      }
+
+      const body = rows.map(({ room_no, cover_count, pillow_count, duvet_count, funnel_count, amount }) =>
+        ({ year: selYear!, half_year: selHalf, chasu: selChasu, room_no, cover_count, pillow_count, duvet_count, funnel_count, amount }));
+
+      // laundry_target 저장
+      const delT = await fetch(
+        `${supaUrl}/laundry_target?year=eq.${selYear}&half_year=eq.${encodeURIComponent(selHalf)}&chasu=eq.${encodeURIComponent(selChasu)}`,
+        { method: 'DELETE', headers: hdr }
+      );
+      if (!delT.ok) throw new Error(`저장 실패 (laundry_target 삭제 ${delT.status})`);
+      const insT = await fetch(`${supaUrl}/laundry_target`, { method: 'POST', headers: { ...hdr, Prefer: 'return=minimal' }, body: JSON.stringify(body) });
+      if (!insT.ok) throw new Error(`저장 실패 (laundry_target 삽입 ${insT.status})`);
+
+      // laundry_history 저장
+      const delH = await fetch(
+        `${supaUrl}/laundry_history?year=eq.${selYear}&half_year=eq.${encodeURIComponent(selHalf)}&chasu=eq.${encodeURIComponent(selChasu)}`,
+        { method: 'DELETE', headers: hdr }
+      );
+      if (!delH.ok) throw new Error(`저장 실패 (laundry_history 삭제 ${delH.status})`);
+      const insH = await fetch(`${supaUrl}/laundry_history`, { method: 'POST', headers: { ...hdr, Prefer: 'return=minimal' }, body: JSON.stringify(body) });
+      if (!insH.ok) throw new Error(`저장 실패 (laundry_history 삽입 ${insH.status})`);
+
+      setHistoryExists(true);
+      setFromHistory(true);
       setSaved(true);
     } catch (e) { setError(e instanceof Error ? e.message : '저장 중 오류가 발생했습니다.'); }
     finally { setSaving(false); }
@@ -209,7 +264,7 @@ export function PageLaundryTargets() {
   const btnBase: React.CSSProperties = { padding: '3px 9px', fontSize: 11, fontWeight: 600, borderRadius: 5, border: 'none', cursor: 'pointer' };
   const btnEdit_:   React.CSSProperties = { ...btnBase, background: '#3B82F6', color: '#fff' };
   const btnDel_:    React.CSSProperties = { ...btnBase, background: '#EF4444', color: '#fff', marginLeft: 4 };
-const btnSave_:   React.CSSProperties = { ...btnBase, background: '#0d9488', color: '#fff' };
+  const btnSave_:   React.CSSProperties = { ...btnBase, background: '#0d9488', color: '#fff' };
   const btnCancel_: React.CSSProperties = { ...btnBase, background: '#6B7280', color: '#fff', marginLeft: 4 };
 
   const fmlDiv = (count: number, price: number) => (
@@ -221,6 +276,7 @@ const btnSave_:   React.CSSProperties = { ...btnBase, background: '#0d9488', col
   const allHalves  = [...new Set(Object.values(yearHalfMap).flat())].sort();
   const allChasues = [...new Set(Object.values(yearHalfChasuMap).flatMap(hm => Object.values(hm).flat()))].sort();
   const showTable  = rows.length > 0 || addMode;
+  const canGenerate = !loading && !!selYear && !!selChasu;
 
   return (
     <div>
@@ -231,27 +287,53 @@ const btnSave_:   React.CSSProperties = { ...btnBase, background: '#0d9488', col
       <div style={{ background: 'var(--surface)', borderRadius: 'var(--r)', border: '1px solid var(--border)', padding: '20px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>년도</label>
-          <select value={selYear ?? ''} onChange={e => { setSelYear(Number(e.target.value)); setRows([]); setSaved(false); }} style={selStyle}>
+          <select value={selYear ?? ''} onChange={e => { setSelYear(Number(e.target.value)); setRows([]); setSaved(false); setHistoryExists(false); setFromHistory(false); }} style={selStyle}>
             {years.map(y => <option key={y} value={y}>{y}년</option>)}
             {years.length === 0 && <option value="">-</option>}
           </select>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>반기구분</label>
-          <select value={selHalf} onChange={e => { setSelHalf(e.target.value); setRows([]); setSaved(false); }} disabled={halves.length === 0} style={{ ...selStyle, minWidth: 100 }}>
+          <select value={selHalf} onChange={e => { setSelHalf(e.target.value); setRows([]); setSaved(false); setHistoryExists(false); setFromHistory(false); }} disabled={halves.length === 0} style={{ ...selStyle, minWidth: 100 }}>
             {halves.length === 0 ? <option value="">-</option> : halves.map(h => <option key={h} value={h}>{h}</option>)}
           </select>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>차수</label>
-          <select value={selChasu} onChange={e => { setSelChasu(e.target.value); setRows([]); setSaved(false); }} disabled={chasues.length === 0} style={{ ...selStyle, minWidth: 80 }}>
+          <select value={selChasu} onChange={e => { setSelChasu(e.target.value); setRows([]); setSaved(false); setHistoryExists(false); setFromHistory(false); }} disabled={chasues.length === 0} style={{ ...selStyle, minWidth: 80 }}>
             {chasues.length === 0 ? <option value="">-</option> : chasues.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <button onClick={generate} disabled={loading || !selYear || !selChasu}
-          style={{ marginLeft: 'auto', padding: '8px 24px', fontSize: 13, fontWeight: 700, borderRadius: 8, border: 'none', cursor: (loading || !selYear || !selChasu) ? 'default' : 'pointer', background: (loading || !selYear || !selChasu) ? 'var(--border)' : 'var(--accent)', color: '#fff', boxShadow: (loading || !selYear || !selChasu) ? 'none' : '0 2px 10px rgba(13,148,136,0.28)', transition: 'all var(--t)' }}>
-          {loading ? '조회 중…' : '대상 추출'}
-        </button>
+
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {/* 초기화 버튼 */}
+          <button
+            onClick={resetHistory}
+            disabled={!canGenerate || !historyExists}
+            title="laundry_history 삭제 후 재추출"
+            style={{
+              padding: '8px 20px', fontSize: 13, fontWeight: 700, borderRadius: 8, border: 'none',
+              cursor: (!canGenerate || !historyExists) ? 'default' : 'pointer',
+              background: (!canGenerate || !historyExists) ? 'var(--border)' : '#F97316',
+              color: '#fff', transition: 'all var(--t)',
+            }}
+          >
+            🔄 초기화
+          </button>
+          {/* 대상 추출 버튼 */}
+          <button
+            onClick={generate}
+            disabled={!canGenerate}
+            style={{
+              padding: '8px 24px', fontSize: 13, fontWeight: 700, borderRadius: 8, border: 'none',
+              cursor: canGenerate ? 'pointer' : 'default',
+              background: canGenerate ? 'var(--accent)' : 'var(--border)',
+              color: '#fff', boxShadow: canGenerate ? '0 2px 10px rgba(13,148,136,0.28)' : 'none', transition: 'all var(--t)',
+            }}
+          >
+            {loading ? '조회 중…' : '대상 추출'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -266,16 +348,30 @@ const btnSave_:   React.CSSProperties = { ...btnBase, background: '#0d9488', col
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
               <span style={{ fontSize: 14, fontWeight: 700 }}>{selYear}년 {selHalf} {selChasu} 세탁 대상 목록</span>
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>총 {rows.length}개 객실 · {fmt(totalAmount)}원</span>
+              {fromHistory && (
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#0d9488', background: 'rgba(13,148,136,0.10)', padding: '2px 10px', borderRadius: 20, border: '1px solid rgba(13,148,136,0.25)' }}>
+                  ✓ 확정 이력
+                </span>
+              )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {saved && <span style={{ fontSize: 12, color: '#059669', fontWeight: 700 }}>✓ 저장완료</span>}
-              <button onClick={openAdd} disabled={addMode}
-                style={{ padding: '7px 16px', fontSize: 13, fontWeight: 700, borderRadius: 7, border: 'none', cursor: addMode ? 'default' : 'pointer', background: addMode ? 'var(--border)' : '#8B5CF6', color: '#fff' }}>
+              <button onClick={openAdd} disabled={addMode || historyExists}
+                style={{ padding: '7px 16px', fontSize: 13, fontWeight: 700, borderRadius: 7, border: 'none', cursor: (addMode || historyExists) ? 'default' : 'pointer', background: (addMode || historyExists) ? 'var(--border)' : '#8B5CF6', color: '#fff' }}>
                 ＋ 추가
               </button>
-              <button onClick={save} disabled={saving}
-                style={{ padding: '7px 20px', fontSize: 13, fontWeight: 700, borderRadius: 7, border: 'none', cursor: saving ? 'default' : 'pointer', background: saving ? 'var(--border)' : '#0d9488', color: '#fff' }}>
-                {saving ? '저장 중…' : '확정'}
+              <button
+                onClick={save}
+                disabled={saving || historyExists}
+                title={historyExists ? '이미 확정된 항목입니다. 초기화 후 다시 확정하세요.' : ''}
+                style={{
+                  padding: '7px 20px', fontSize: 13, fontWeight: 700, borderRadius: 7, border: 'none',
+                  cursor: (saving || historyExists) ? 'default' : 'pointer',
+                  background: historyExists ? '#059669' : saving ? 'var(--border)' : '#0d9488',
+                  color: '#fff', opacity: (saving || historyExists) ? 0.75 : 1,
+                }}
+              >
+                {saving ? '저장 중…' : historyExists ? '✓ 확정됨' : '확정'}
               </button>
             </div>
           </div>
@@ -308,39 +404,33 @@ const btnSave_:   React.CSSProperties = { ...btnBase, background: '#0d9488', col
                       <td style={tdSt}>{row.half_year}</td>
                       <td style={tdSt}>{row.chasu}</td>
                       <td style={{ ...tdSt, fontWeight: 600 }}>{row.room_no}호</td>
-                      {/* 침대커버수 */}
                       <td style={tdNum}>
                         {isEditing ? (
                           <><input type="number" min={0} value={editDraft.cover_count} onChange={e => setEditDraft(d => ({ ...d, cover_count: Math.max(0, Number(e.target.value)) }))} style={inputSt} />
                           {editDraft.cover_count > 0 && fmlDiv(editDraft.cover_count, p1)}</>
                         ) : (<>{fmt(row.cover_count)}{fmlDiv(row.cover_count, p1)}</>)}
                       </td>
-                      {/* 배개수 */}
                       <td style={tdNum}>
                         {isEditing ? (
                           <><input type="number" min={0} value={editDraft.pillow_count} onChange={e => setEditDraft(d => ({ ...d, pillow_count: Math.max(0, Number(e.target.value)) }))} style={inputSt} />
                           {editDraft.pillow_count > 0 && fmlDiv(editDraft.pillow_count, p2)}</>
                         ) : (<>{fmt(row.pillow_count)}{fmlDiv(row.pillow_count, p2)}</>)}
                       </td>
-                      {/* 이불수 */}
                       <td style={tdNum}>
                         {isEditing ? (
                           <><input type="number" min={0} value={editDraft.duvet_count} onChange={e => setEditDraft(d => ({ ...d, duvet_count: Math.max(0, Number(e.target.value)) }))} style={inputSt} />
                           {editDraft.duvet_count > 0 && fmlDiv(editDraft.duvet_count, p3)}</>
                         ) : (<>{fmt(row.duvet_count)}{fmlDiv(row.duvet_count, p3)}</>)}
                       </td>
-                      {/* 발판수 */}
                       <td style={tdNum}>
                         {isEditing ? (
                           <><input type="number" min={0} value={editDraft.funnel_count} onChange={e => setEditDraft(d => ({ ...d, funnel_count: Math.max(0, Number(e.target.value)) }))} style={inputSt} />
                           {editDraft.funnel_count > 0 && fmlDiv(editDraft.funnel_count, p4)}</>
                         ) : (<>{row.funnel_count}{fmlDiv(row.funnel_count, p4)}</>)}
                       </td>
-                      {/* 금액 */}
                       <td style={{ ...tdNum, fontWeight: 700, color: 'var(--accent)' }}>
                         {isEditing ? fmt(calcAmt(editDraft)) + '원' : fmt(row.amount) + '원'}
                       </td>
-                      {/* 작업 */}
                       <td style={{ ...tdSt, textAlign: 'center', whiteSpace: 'nowrap' }}>
                         {isEditing ? (
                           <>
@@ -349,8 +439,8 @@ const btnSave_:   React.CSSProperties = { ...btnBase, background: '#0d9488', col
                           </>
                         ) : (
                           <>
-                            <button onClick={() => startEdit(i)} style={btnEdit_}>변경</button>
-                            <button onClick={() => deleteRow(i)} style={btnDel_}>삭제</button>
+                            <button onClick={() => startEdit(i)} disabled={historyExists} style={{ ...btnEdit_, opacity: historyExists ? 0.4 : 1, cursor: historyExists ? 'default' : 'pointer' }}>변경</button>
+                            <button onClick={() => deleteRow(i)} disabled={historyExists} style={{ ...btnDel_, opacity: historyExists ? 0.4 : 1, cursor: historyExists ? 'default' : 'pointer' }}>삭제</button>
                           </>
                         )}
                       </td>
@@ -358,7 +448,6 @@ const btnSave_:   React.CSSProperties = { ...btnBase, background: '#0d9488', col
                   );
                 })}
 
-                {/* 추가 입력 행 */}
                 {addMode && (
                   <tr style={{ background: 'rgba(139,92,246,0.06)' }}>
                     <td style={{ ...tdSt, color: 'var(--text-xs)', textAlign: 'center', fontWeight: 700 }}>+</td>
