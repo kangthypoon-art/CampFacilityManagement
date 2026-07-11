@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Floor2SVG } from './Floor2SVG';
 import { Floor3SVG } from './Floor3SVG';
+import { generateWordReport, type RoomReportData, type LaundryReportData, type SettlementRow as ReportSettlementRow } from '@/lib/wordReport';
 
 // ── 타입 ──────────────────────────────────────────────────────────────────────
 
@@ -132,8 +133,9 @@ export function PageRooms() {
   const [showAddForm,   setShowAddForm]   = useState(false);
   const [addForm,       setAddForm]       = useState<Partial<AssignmentRow>>({});
   const [formError,     setFormError]     = useState<string | null>(null);
-  const [saving,        setSaving]        = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [saving,           setSaving]           = useState(false);
+  const [confirmDelete,    setConfirmDelete]    = useState<string | null>(null);
+  const [reportGenerating, setReportGenerating] = useState(false);
 
   // ── 데이터 로드 ──
   useEffect(() => {
@@ -216,6 +218,85 @@ export function PageRooms() {
   const occupancy    = computeOccupancy(masters1Raw, filteredAssignments);
   const checkInRate  = computeCheckInRate(masters1Raw, filteredAssignments);
   const occupiedRoomNos = new Set(filteredAssignments.map(a => a.room_no));
+
+  // ── 보고서 다운로드 ──
+  const handleReportDownload = async () => {
+    if (!selYear || !selHalf || !selChasu) {
+      alert('년도, 반기, 차수를 모두 선택한 후 보고서를 생성하세요.');
+      return;
+    }
+    setReportGenerating(true);
+    try {
+      const halfEnc  = encodeURIComponent(selHalf);
+      const chasuEnc = encodeURIComponent(selChasu);
+
+      const [tRes, pRes] = await Promise.all([
+        fetch(`/api/supabase/rest/v1/laundry_target?select=room_no,cover_count,pillow_count,duvet_count,funnel_count,amount&year=eq.${selYear}&half_year=eq.${halfEnc}&chasu=eq.${chasuEnc}&order=room_no`, { headers: { 'Content-Type': 'application/json' } }),
+        fetch('/api/supabase/rest/v1/category_price?select=category_code,unit_price', { headers: { 'Content-Type': 'application/json' } }),
+      ]);
+
+      type LTarget = { room_no: string; cover_count: number; pillow_count: number; duvet_count: number; funnel_count: number; amount: number };
+      const targets: LTarget[] = tRes.ok ? await tRes.json() : [];
+      const priceRows: { category_code: string; unit_price: number }[] = pRes.ok ? await pRes.json() : [];
+      const priceMap: Record<string, number> = {};
+      for (const { category_code, unit_price } of priceRows) priceMap[category_code] = Number(unit_price) || 0;
+
+      const catCounts  = [0, 0, 0, 0];
+      const catAmounts = [0, 0, 0, 0];
+      const prices = ['1001', '1002', '1003', '1004'].map(k => priceMap[k] ?? 0);
+
+      for (const t of Array.isArray(targets) ? targets : []) {
+        catCounts[0] += t.cover_count  ?? 0;
+        catCounts[1] += t.pillow_count ?? 0;
+        catCounts[2] += t.duvet_count  ?? 0;
+        catCounts[3] += t.funnel_count ?? 0;
+      }
+      catAmounts[0] = catCounts[0] * prices[0];
+      catAmounts[1] = catCounts[1] * prices[1];
+      catAmounts[2] = catCounts[2] * prices[2];
+      catAmounts[3] = catCounts[3] * prices[3];
+
+      const roomData: RoomReportData = {
+        year: selYear, half_year: selHalf, chasu: selChasu,
+        totalRooms: floorData.total,
+        roomFloors: floorData.floors,
+        occupancyRate: occupancy.rate,
+        occupancyOccupied: occupancy.occupied,
+        occupancyTotal: occupancy.total,
+        occupancyFloors: occupancy.floors,
+        totalGuests: guestData.total,
+        guestFloors: guestData.floors,
+        checkInRate: checkInRate.rate,
+        checkInOccupied: checkInRate.occupied,
+        checkInTotal: checkInRate.total,
+        checkInFloors: checkInRate.floors,
+      };
+
+      const laundryData: LaundryReportData = {
+        catCounts, catAmounts,
+        totalCount:  catCounts.reduce((a, b) => a + b, 0),
+        totalAmount: catAmounts.reduce((a, b) => a + b, 0),
+      };
+
+      const settlementRows: ReportSettlementRow[] = Array.isArray(targets)
+        ? targets.map(t => ({
+            chasu: selChasu,
+            room_no: t.room_no,
+            cover_count:  t.cover_count  ?? 0,
+            pillow_count: t.pillow_count ?? 0,
+            duvet_count:  t.duvet_count  ?? 0,
+            funnel_count: t.funnel_count ?? 0,
+            amount:       t.amount       ?? 0,
+          }))
+        : [];
+
+      await generateWordReport(roomData, laundryData, settlementRows);
+    } catch (e) {
+      alert(`보고서 생성 중 오류: ${(e as Error).message}`);
+    } finally {
+      setReportGenerating(false);
+    }
+  };
 
   // ── CRUD ──
   const supaFetch = (path: string, opts: RequestInit = {}) =>
@@ -389,15 +470,18 @@ export function PageRooms() {
           </div>
         </div>
         <button
+          onClick={handleReportDownload}
+          disabled={reportGenerating}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
-            background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 9,
-            padding: '10px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            background: reportGenerating ? '#6b7280' : 'var(--accent)', color: '#fff', border: 'none', borderRadius: 9,
+            padding: '10px 20px', fontSize: 13, fontWeight: 600,
+            cursor: reportGenerating ? 'default' : 'pointer',
             transition: 'all var(--t)', boxShadow: '0 2px 10px rgba(13,148,136,0.28)',
-            whiteSpace: 'nowrap', letterSpacing: '-0.01em',
+            whiteSpace: 'nowrap', letterSpacing: '-0.01em', opacity: reportGenerating ? 0.75 : 1,
           }}
         >
-          ＋ 보고서 다운로드
+          {reportGenerating ? '⏳ 생성 중…' : '↓ 보고서 다운로드'}
         </button>
       </div>
 
