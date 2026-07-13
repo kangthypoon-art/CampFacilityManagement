@@ -203,8 +203,8 @@ export function PageUpload() {
     setErrMsg('');
 
     try {
-      // ── 1. 파일 내 중복 감지 (PK 기준, 마지막 행 우선) ───────────────
-      const pkKey = (r: RoomRow) => `${r.year}|${r.half_year}|${r.room_no}|${r.chasu}|${r.seq}`;
+      // ── 1. 파일 내 중복 제거 (PK 기준, 마지막 행 우선) ──────────────
+      const pkKey = (r: RoomRow) => `${r.year}||${r.half_year}||${r.room_no}||${r.chasu}||${r.seq}`;
       const seenMap = new Map<string, RoomRow>();
       const intraFileDups: RoomRow[] = [];
       for (const r of rows) {
@@ -214,49 +214,30 @@ export function PageUpload() {
       }
       const deduped = [...seenMap.values()];
 
-      // ── 2. DB 기존 데이터 중복 확인 ──────────────────────────────────
-      const combos = [...new Set(deduped.map(r => `${r.year}|${r.half_year}`))];
-      const existingPkSet = new Set<string>();
-      for (const combo of combos) {
-        const [yr, hy] = combo.split('|');
-        const chk = await fetch(
-          `${url}/room_assignment?year=eq.${yr}&half_year=eq.${hy}&select=year,half_year,room_no,chasu,seq`,
-          { headers: hdr }
+      // ── 2. year/half_year/chasu별 기존 데이터 삭제 후 재저장 ─────────
+      // 파일에 포함된 (year, half_year, chasu) 조합을 추출
+      const combos = [...new Map(
+        deduped.map(r => [`${r.year}||${r.half_year}||${r.chasu}`, { year: r.year, half_year: r.half_year, chasu: r.chasu }])
+      ).values()];
+
+      for (const { year, half_year, chasu } of combos) {
+        const delRes = await fetch(
+          `${url}/room_assignment?year=eq.${year}&half_year=eq.${encodeURIComponent(half_year)}&chasu=eq.${encodeURIComponent(chasu)}`,
+          { method: 'DELETE', headers: hdr }
         );
-        if (chk.ok) {
-          const existing = await chk.json() as { year: number; half_year: string; room_no: string; chasu: string; seq: number }[];
-          for (const r of existing)
-            existingPkSet.add(`${r.year}|${r.half_year}|${r.room_no}|${r.chasu}|${r.seq}`);
+        if (!delRes.ok) {
+          const body = await delRes.json().catch(() => ({}));
+          throw new Error(body?.message ?? `기존 데이터 삭제 실패 (${year}년 ${half_year} ${chasu}차수, HTTP ${delRes.status})`);
         }
       }
-      const dbDups = deduped.filter(r => existingPkSet.has(pkKey(r)));
 
-      // ── 3. 중복 경고 수집 ─────────────────────────────────────────────
-      const dupWarns: string[] = [];
-      if (intraFileDups.length > 0) {
-        const preview = intraFileDups.slice(0, 8)
-          .map(r => `${r.room_no}호 ${r.chasu}차 seq${r.seq}`).join(', ');
-        dupWarns.push(
-          `파일 내 중복 ${intraFileDups.length}건 제거(마지막 행 우선): ${preview}` +
-          (intraFileDups.length > 8 ? ` 외 ${intraFileDups.length - 8}건` : '')
-        );
-      }
-      if (dbDups.length > 0) {
-        const preview = dbDups.slice(0, 8)
-          .map(r => `${r.room_no}호 ${r.chasu}차 seq${r.seq}(${r.name})`).join(', ');
-        dupWarns.push(
-          `DB 기존 데이터 ${dbDups.length}건 덮어쓰기: ${preview}` +
-          (dbDups.length > 8 ? ` 외 ${dbDups.length - 8}건` : '')
-        );
-      }
-
-      // ── 4. 청크 저장 (upsert) ─────────────────────────────────────────
+      // ── 3. 청크 INSERT ────────────────────────────────────────────────
       const CHUNK = 100;
       for (let i = 0; i < deduped.length; i += CHUNK) {
         const chunk = deduped.slice(i, i + CHUNK);
         const res = await fetch(`${url}/room_assignment`, {
           method: 'POST',
-          headers: { ...hdr, Prefer: 'return=minimal,resolution=merge-duplicates' },
+          headers: { ...hdr, Prefer: 'return=minimal' },
           body: JSON.stringify(chunk),
         });
         if (!res.ok) {
@@ -265,9 +246,20 @@ export function PageUpload() {
         }
       }
 
+      // ── 4. 파일 내 중복 경고 ─────────────────────────────────────────
+      const warns: string[] = [];
+      if (intraFileDups.length > 0) {
+        const preview = intraFileDups.slice(0, 8)
+          .map(r => `${r.room_no}호 ${r.chasu}차 seq${r.seq}`).join(', ');
+        warns.push(
+          `파일 내 중복 ${intraFileDups.length}건 제거(마지막 행 우선): ${preview}` +
+          (intraFileDups.length > 8 ? ` 외 ${intraFileDups.length - 8}건` : '')
+        );
+      }
+      if (warns.length > 0) setSeqWarnings(w => [...warns, ...w]);
+
       setSavedCount(deduped.length);
       setSaveState('done');
-      if (dupWarns.length > 0) setSeqWarnings(w => [...dupWarns, ...w]);
     } catch (e) {
       setErrMsg((e as Error).message);
       setSaveState('error');

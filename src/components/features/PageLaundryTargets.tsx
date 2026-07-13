@@ -30,6 +30,8 @@ export function PageLaundryTargets() {
   const [selChasu,         setSelChasu]         = useState('');
   const [rows,             setRows]             = useState<LaundryRow[]>([]);
   const [prices,           setPrices]           = useState<Record<string, number>>({});
+  const [categoryRows,     setCategoryRows]     = useState<{ category_code: number; category_name: string; unit_price: number; is_active: string }[]>([]);
+  const [activePrices,     setActivePrices]     = useState<Record<string, number>>({});
   const [roomOptions,      setRoomOptions]      = useState<string[]>([]);
   const [loading,          setLoading]          = useState(false);
   const [saving,           setSaving]           = useState(false);
@@ -49,11 +51,11 @@ export function PageLaundryTargets() {
   useEffect(() => {
     Promise.all([
       fetch(`${supaUrl}/room_assignment?select=year,half_year,chasu`, { headers: hdr }).then(r => r.json()),
-      fetch(`${supaUrl}/category_price?select=category_code,unit_price`, { headers: hdr }).then(r => r.json()),
+      fetch(`${supaUrl}/category_price?select=category_code,category_name,unit_price,is_active&order=category_code`, { headers: hdr }).then(r => r.json()),
       fetch(`${supaUrl}/room_master?category_code=eq.1000&seq=eq.1&select=room_no&order=room_no`, { headers: hdr }).then(r => r.json()),
     ]).then(([assignments, priceRows, roomRows]: [
       { year: number; half_year: string; chasu: string }[],
-      { category_code: string; unit_price: number }[],
+      { category_code: number; category_name: string; unit_price: number; is_active: string }[],
       { room_no: string }[],
     ]) => {
       const halfSet:  Record<number, Set<string>> = {};
@@ -82,8 +84,10 @@ export function PageLaundryTargets() {
         setSelYear(fy); setHalves(halfMap[fy] ?? []); setSelHalf(fh); setChasues(chasuMap[fy]?.[fh] ?? []); setSelChasu(fc);
       }
       const pm: Record<string, number> = {};
-      for (const { category_code, unit_price } of priceRows) pm[category_code] = unit_price;
+      for (const { category_code, unit_price } of priceRows) pm[String(category_code)] = unit_price;
       setPrices(pm);
+      setActivePrices(pm);
+      setCategoryRows(Array.isArray(priceRows) ? priceRows : []);
       setRoomOptions(roomRows.map(r => r.room_no));
     }).catch(() => setError('기초 데이터 조회 중 오류가 발생했습니다.'));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,7 +107,8 @@ export function PageLaundryTargets() {
   }, [selHalf, selYear, yearHalfChasuMap]);
 
   // 공통 추출 로직 (room_master + room_assignment 기반)
-  const runExtract = useCallback(async (year: number, half: string, chasu: string): Promise<LaundryRow[]> => {
+  // priceMap: category_price_history 이력 단가가 있으면 전달, 없으면 현재 prices 사용
+  const runExtract = useCallback(async (year: number, half: string, chasu: string, priceMap?: Record<string, number>): Promise<LaundryRow[]> => {
     const [masters, assignments] = await Promise.all([
       fetch(`${supaUrl}/room_master?category_code=eq.1000&seq=eq.1&select=room_no,guest_count&order=room_no`, { headers: hdr }).then(r => r.json()),
       fetch(`${supaUrl}/room_assignment?year=eq.${year}&half_year=eq.${encodeURIComponent(half)}&chasu=eq.${encodeURIComponent(chasu)}&select=room_no`, { headers: hdr }).then(r => r.json()),
@@ -120,7 +125,8 @@ export function PageLaundryTargets() {
       duvetMap[room_no]  = (duvetMap[room_no]  ?? 0) + 1;
       pillowMap[room_no] = (pillowMap[room_no] ?? 0) + 1;
     }
-    const p1 = prices['1001'] ?? 0, p2 = prices['1002'] ?? 0, p3 = prices['1003'] ?? 0, p4 = prices['1004'] ?? 0;
+    const pm = priceMap ?? prices;
+    const p1 = pm['1001'] ?? 0, p2 = pm['1002'] ?? 0, p3 = pm['1003'] ?? 0, p4 = pm['1004'] ?? 0;
     return roomList.filter((room_no: string) => assignedRooms.has(room_no)).map((room_no: string) => {
       const cover  = guestCountMap[room_no] ?? 0;
       const pillow = pillowMap[room_no] ?? 0;
@@ -130,11 +136,31 @@ export function PageLaundryTargets() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prices]);
 
+  // category_price_history 조회 → 단가 맵 반환 (없으면 null)
+  const fetchHistPrices = async (year: number, half: string, chasu: string): Promise<Record<string, number> | null> => {
+    const res = await fetch(
+      `${supaUrl}/category_price_history?year=eq.${year}&half_year=eq.${encodeURIComponent(half)}&chasu=eq.${encodeURIComponent(chasu)}&select=category_code,unit_price`,
+      { headers: hdr }
+    );
+    if (!res.ok) return null;
+    const rows: { category_code: number; unit_price: number }[] = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const pm: Record<string, number> = {};
+    for (const { category_code, unit_price } of rows) pm[String(category_code)] = unit_price;
+    return pm;
+  };
+
   // 대상 추출: laundry_history 먼저 확인 → 있으면 표시, 없으면 추출
+  // 어느 경우든 category_price_history 단가가 있으면 그 값을 activePrices에 반영
   const generate = async () => {
     if (!selYear) return;
     setLoading(true); setError(null); setSaved(false); setEditingIdx(null); setAddMode(false);
     try {
+      // 가격 이력 조회 (있으면 우선 사용, 없으면 현재 단가 사용)
+      const histPm = await fetchHistPrices(selYear, selHalf, selChasu);
+      const ap = histPm ?? prices;
+      setActivePrices(ap);
+
       const histRes = await fetch(
         `${supaUrl}/laundry_history?year=eq.${selYear}&half_year=eq.${encodeURIComponent(selHalf)}&chasu=eq.${encodeURIComponent(selChasu)}&select=*&order=room_no`,
         { headers: hdr }
@@ -159,28 +185,33 @@ export function PageLaundryTargets() {
           return;
         }
       }
-      // history 없음 → 신규 추출
+      // history 없음 → 신규 추출 (이력 단가 적용)
       setHistoryExists(false);
       setFromHistory(false);
-      const extracted = await runExtract(selYear, selHalf, selChasu);
+      const extracted = await runExtract(selYear, selHalf, selChasu, ap);
       setRows(extracted);
     } catch { setError('데이터 조회 중 오류가 발생했습니다.'); }
     finally { setLoading(false); }
   };
 
-  // 초기화: laundry_history 삭제 → 재추출
+  // 초기화: laundry_history + category_price_history 삭제 → 재추출
   const resetHistory = async () => {
     if (!selYear) return;
     setLoading(true); setError(null); setSaved(false); setEditingIdx(null); setAddMode(false);
     try {
-      const delRes = await fetch(
-        `${supaUrl}/laundry_history?year=eq.${selYear}&half_year=eq.${encodeURIComponent(selHalf)}&chasu=eq.${encodeURIComponent(selChasu)}`,
-        { method: 'DELETE', headers: hdr }
-      );
-      if (!delRes.ok) throw new Error(`초기화 실패 (${delRes.status})`);
+      const enc = encodeURIComponent;
+      const condition = `year=eq.${selYear}&half_year=eq.${enc(selHalf)}&chasu=eq.${enc(selChasu)}`;
+      const [delH, delPH] = await Promise.all([
+        fetch(`${supaUrl}/laundry_history?${condition}`,        { method: 'DELETE', headers: hdr }),
+        fetch(`${supaUrl}/category_price_history?${condition}`, { method: 'DELETE', headers: hdr }),
+      ]);
+      if (!delH.ok)  throw new Error(`초기화 실패 (laundry_history ${delH.status})`);
+      if (!delPH.ok) throw new Error(`초기화 실패 (category_price_history ${delPH.status})`);
       setHistoryExists(false);
       setFromHistory(false);
-      const extracted = await runExtract(selYear, selHalf, selChasu);
+      // 가격 이력이 삭제됐으므로 현재 단가로 재추출
+      setActivePrices(prices);
+      const extracted = await runExtract(selYear, selHalf, selChasu, prices);
       setRows(extracted);
     } catch (e) { setError(e instanceof Error ? e.message : '초기화 중 오류가 발생했습니다.'); }
     finally { setLoading(false); }
@@ -224,6 +255,24 @@ export function PageLaundryTargets() {
       const insH = await fetch(`${supaUrl}/laundry_history`, { method: 'POST', headers: { ...hdr, Prefer: 'return=minimal' }, body: JSON.stringify(body) });
       if (!insH.ok) throw new Error(`저장 실패 (laundry_history 삽입 ${insH.status})`);
 
+      // category_price_history 저장 (확정 시점 단가 스냅샷)
+      if (categoryRows.length > 0) {
+        const priceHistBody = categoryRows.map(r => ({
+          year: selYear!, half_year: selHalf, chasu: selChasu,
+          category_code: r.category_code,
+          category_name: r.category_name,
+          unit_price: r.unit_price,
+          is_active: r.is_active,
+        }));
+        const delPH = await fetch(
+          `${supaUrl}/category_price_history?year=eq.${selYear}&half_year=eq.${encodeURIComponent(selHalf)}&chasu=eq.${encodeURIComponent(selChasu)}`,
+          { method: 'DELETE', headers: hdr }
+        );
+        if (!delPH.ok) throw new Error(`저장 실패 (category_price_history 삭제 ${delPH.status})`);
+        const insPH = await fetch(`${supaUrl}/category_price_history`, { method: 'POST', headers: { ...hdr, Prefer: 'return=minimal' }, body: JSON.stringify(priceHistBody) });
+        if (!insPH.ok) throw new Error(`저장 실패 (category_price_history 삽입 ${insPH.status})`);
+      }
+
       setHistoryExists(true);
       setFromHistory(true);
       setSaved(true);
@@ -232,7 +281,7 @@ export function PageLaundryTargets() {
   };
 
   const calcAmt = (d: { cover_count: number; pillow_count: number; duvet_count: number; funnel_count: number }) =>
-    d.cover_count * (prices['1001'] ?? 0) + d.pillow_count * (prices['1002'] ?? 0) + d.duvet_count * (prices['1003'] ?? 0) + d.funnel_count * (prices['1004'] ?? 0);
+    d.cover_count * (activePrices['1001'] ?? 0) + d.pillow_count * (activePrices['1002'] ?? 0) + d.duvet_count * (activePrices['1003'] ?? 0) + d.funnel_count * (activePrices['1004'] ?? 0);
 
   const startEdit = (idx: number) => {
     const r = rows[idx];
@@ -321,7 +370,7 @@ export function PageLaundryTargets() {
           <button
             onClick={resetHistory}
             disabled={!canGenerate || !historyExists}
-            title="laundry_history 삭제 후 재추출"
+            title="laundry_history · category_price_history 삭제 후 재추출"
             style={{
               padding: '8px 20px', fontSize: 13, fontWeight: 700, borderRadius: 8, border: 'none',
               cursor: (!canGenerate || !historyExists) ? 'default' : 'pointer',
@@ -397,8 +446,8 @@ export function PageLaundryTargets() {
                   <th style={thSt}>차수</th>
                   <th style={thSt}>객실호수</th>
                   <th style={{ ...thSt, textAlign: 'right' }}>침대커버수</th>
-                  <th style={{ ...thSt, textAlign: 'right' }}>배개수</th>
                   <th style={{ ...thSt, textAlign: 'right' }}>이불수</th>
+                  <th style={{ ...thSt, textAlign: 'right' }}>배개수</th>
                   <th style={{ ...thSt, textAlign: 'right' }}>발판수</th>
                   <th style={{ ...thSt, textAlign: 'right' }}>금액</th>
                   <th style={{ ...thSt, textAlign: 'center', width: 130 }}>작업</th>
@@ -406,7 +455,7 @@ export function PageLaundryTargets() {
               </thead>
               <tbody>
                 {rows.map((row, i) => {
-                  const p1 = prices['1001'] ?? 0, p2 = prices['1002'] ?? 0, p3 = prices['1003'] ?? 0, p4 = prices['1004'] ?? 0;
+                  const p1 = activePrices['1001'] ?? 0, p2 = activePrices['1002'] ?? 0, p3 = activePrices['1003'] ?? 0, p4 = activePrices['1004'] ?? 0;
                   const isEditing = editingIdx === i;
                   return (
                     <tr key={row.room_no + '|' + row.year + '|' + row.chasu + '|' + i} style={{ background: i % 2 === 1 ? 'rgba(0,0,0,0.02)' : 'transparent' }}>
@@ -423,15 +472,15 @@ export function PageLaundryTargets() {
                       </td>
                       <td style={tdNum}>
                         {isEditing ? (
-                          <><input type="number" min={0} value={editDraft.pillow_count} onChange={e => setEditDraft(d => ({ ...d, pillow_count: Math.max(0, Number(e.target.value)) }))} style={inputSt} />
-                          {editDraft.pillow_count > 0 && fmlDiv(editDraft.pillow_count, p2)}</>
-                        ) : (<>{fmt(row.pillow_count)}{fmlDiv(row.pillow_count, p2)}</>)}
-                      </td>
-                      <td style={tdNum}>
-                        {isEditing ? (
                           <><input type="number" min={0} value={editDraft.duvet_count} onChange={e => setEditDraft(d => ({ ...d, duvet_count: Math.max(0, Number(e.target.value)) }))} style={inputSt} />
                           {editDraft.duvet_count > 0 && fmlDiv(editDraft.duvet_count, p3)}</>
                         ) : (<>{fmt(row.duvet_count)}{fmlDiv(row.duvet_count, p3)}</>)}
+                      </td>
+                      <td style={tdNum}>
+                        {isEditing ? (
+                          <><input type="number" min={0} value={editDraft.pillow_count} onChange={e => setEditDraft(d => ({ ...d, pillow_count: Math.max(0, Number(e.target.value)) }))} style={inputSt} />
+                          {editDraft.pillow_count > 0 && fmlDiv(editDraft.pillow_count, p2)}</>
+                        ) : (<>{fmt(row.pillow_count)}{fmlDiv(row.pillow_count, p2)}</>)}
                       </td>
                       <td style={tdNum}>
                         {isEditing ? (
@@ -478,10 +527,10 @@ export function PageLaundryTargets() {
                       <input list="dl-room" value={addDraft.room_no} onChange={e => setAddDraft(d => ({ ...d, room_no: e.target.value }))} style={textInSt} placeholder="객실호수" />
                       <datalist id="dl-room">{roomOptions.map(r => <option key={r} value={r} />)}</datalist>
                     </td>
-                    {(['cover_count', 'pillow_count', 'duvet_count', 'funnel_count'] as const).map((field, fi) => {
-                      const priceKey = ['1001','1002','1003','1004'][fi];
+                    {(['cover_count', 'duvet_count', 'pillow_count', 'funnel_count'] as const).map((field, fi) => {
+                      const priceKey = ['1001','1003','1002','1004'][fi];
                       const val = Number(addDraft[field]) || 0;
-                      const price = prices[priceKey] ?? 0;
+                      const price = activePrices[priceKey] ?? 0;
                       const committed = addCommit.has(field);
                       return (
                         <td key={field} style={tdNum}>
@@ -509,8 +558,8 @@ export function PageLaundryTargets() {
                   <tr style={{ background: 'var(--accent-bg)' }}>
                     <td colSpan={5} style={{ ...tdSt, fontWeight: 700, fontSize: 12, color: 'var(--text-muted)' }}>합계</td>
                     <td style={{ ...tdNum, fontWeight: 700 }}>{fmt(totalCover)}</td>
-                    <td style={{ ...tdNum, fontWeight: 700 }}>{fmt(totalPillow)}</td>
                     <td style={{ ...tdNum, fontWeight: 700 }}>{fmt(totalDuvet)}</td>
+                    <td style={{ ...tdNum, fontWeight: 700 }}>{fmt(totalPillow)}</td>
                     <td style={{ ...tdNum, fontWeight: 700 }}>{fmt(totalFunnel)}</td>
                     <td style={{ ...tdNum, fontWeight: 700, color: 'var(--accent)' }}>{fmt(totalAmount)}원</td>
                     <td style={tdSt} />

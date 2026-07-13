@@ -14,8 +14,8 @@ interface TargetRow {
 }
 
 const PALETTE = ['#4472C4', '#ED7D31', '#A9D18E', '#FF6B6B', '#5B9BD5', '#70AD47', '#FFC000', '#9DC3E6'];
-const CAT_COLORS = ['#4472C4', '#ED7D31', '#A9D18E', '#FF6B6B'];
-const CAT_LABELS = ['침대커버', '배개', '이불', '발판'];
+const CAT_COLORS = ['#4472C4', '#A9D18E', '#ED7D31', '#FF6B6B'];
+const CAT_LABELS = ['침대커버', '이불', '배개', '발판'];
 
 // ─── Rose Chart (Nightingale / Polar Area) ───────────────────────────────────
 
@@ -252,6 +252,7 @@ function ComboChart({ items, selectedLabel, onSelect }: {
 export function PageLaundryDashboard() {
   const [data,       setData]       = useState<TargetRow[]>([]);
   const [prices,     setPrices]     = useState<Record<string, number>>({});
+  const [selPrices,  setSelPrices]  = useState<Record<string, number>>({});
   const [loading,    setLoading]    = useState(true);
   const [fetchErr,   setFetchErr]   = useState<string | null>(null);
   const [selYear,    setSelYear]    = useState<number | null>(null);
@@ -285,11 +286,36 @@ export function PageLaundryDashboard() {
           for (const { category_code, unit_price } of priceRows) pm[category_code] = unit_price;
         }
         setPrices(pm);
+        setSelPrices(pm);
       })
       .catch(e => setFetchErr(String(e)))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 차수 선택 변경 시 category_price_history 조회 → selPrices 갱신
+  useEffect(() => {
+    if (!selHalfKey || !selChasu) { setSelPrices(prices); return; }
+    const [sy, sh] = selHalfKey.split('|');
+    const rawCh = selChasu.replace(/차수$/, '').trim();
+    const enc = encodeURIComponent;
+    fetch(
+      `${supaUrl}/category_price_history?year=eq.${sy}&half_year=eq.${enc(sh)}&chasu=eq.${enc(rawCh)}&select=category_code,unit_price`,
+      { headers: hdr }
+    )
+      .then(r => r.json())
+      .then((rows: { category_code: number; unit_price: number }[]) => {
+        if (Array.isArray(rows) && rows.length > 0) {
+          const pm: Record<string, number> = { ...prices };
+          for (const { category_code, unit_price } of rows) pm[String(category_code)] = unit_price;
+          setSelPrices(pm);
+        } else {
+          setSelPrices(prices);
+        }
+      })
+      .catch(() => setSelPrices(prices));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selHalfKey, selChasu, prices]);
 
   // 년도 목록 (내림차순)
   const years = [...new Set(data.map(r => r.year))].sort((a, b) => b - a);
@@ -340,14 +366,14 @@ export function PageLaundryDashboard() {
     for (const r of filteredData) {
       if (String(r.year) === sy && r.half_year === sh && r.chasu === rawChasu) {
         catCounts[0] += r.cover_count  ?? 0;
-        catCounts[1] += r.pillow_count ?? 0;
-        catCounts[2] += r.duvet_count  ?? 0;
+        catCounts[1] += r.duvet_count  ?? 0;
+        catCounts[2] += r.pillow_count ?? 0;
         catCounts[3] += r.funnel_count ?? 0;
       }
     }
   }
-  const catPriceKeys = ['1001', '1002', '1003', '1004'];
-  const catAmounts  = catCounts.map((c, i) => c * (prices[catPriceKeys[i]] ?? 0));
+  const catPriceKeys = ['1001', '1003', '1002', '1004'];
+  const catAmounts  = catCounts.map((c, i) => c * (selPrices[catPriceKeys[i]] ?? 0));
   const countBars:  BarItem[] = CAT_LABELS.map((l, i) => ({ label: l, value: catCounts[i],  color: CAT_COLORS[i] }));
   const amountBars: BarItem[] = CAT_LABELS.map((l, i) => ({ label: l, value: catAmounts[i], color: CAT_COLORS[i] }));
 

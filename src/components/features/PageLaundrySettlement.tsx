@@ -204,19 +204,30 @@ export function PageLaundrySettlement() {
   const handleExcel = async (row: SettlementRow) => {
     setError(null);
     try {
-      // laundry_target + category_price 병렬 조회
-      const [tRes, pRes] = await Promise.all([
+      const enc = encodeURIComponent;
+      const cond = `year=eq.${row.year}&half_year=eq.${enc(row.half_year)}&chasu=eq.${enc(row.chasu)}`;
+
+      // laundry_target + category_price + category_price_history 병렬 조회
+      const [tRes, pRes, phRes] = await Promise.all([
         fetch(
-          `${supaUrl}/laundry_target?select=year,half_year,chasu,room_no,cover_count,pillow_count,duvet_count,funnel_count,amount&year=eq.${row.year}&half_year=eq.${encodeURIComponent(row.half_year)}&chasu=eq.${encodeURIComponent(row.chasu)}&order=room_no`,
+          `${supaUrl}/laundry_target?select=year,half_year,chasu,room_no,cover_count,pillow_count,duvet_count,funnel_count,amount&${cond}&order=room_no`,
           { headers: hdr }
         ),
         fetch(`${supaUrl}/category_price?select=category_code,unit_price`, { headers: hdr }),
+        fetch(`${supaUrl}/category_price_history?select=category_code,unit_price&${cond}`, { headers: hdr }),
       ]);
       if (!tRes.ok) throw new Error('laundry_target 조회 실패');
       const data: { year: number; half_year: string; chasu: string; room_no: string; cover_count: number; pillow_count: number; duvet_count: number; funnel_count: number; amount: number }[] = await tRes.json();
-      const priceData: { category_code: string; unit_price: number }[] = pRes.ok ? await pRes.json() : [];
+
+      // 현재 단가로 기본 맵 구성, 이력 단가가 있으면 덮어씀
       const priceMap: Record<string, number> = {};
-      for (const { category_code, unit_price } of priceData) priceMap[category_code] = unit_price;
+      const priceData: { category_code: string; unit_price: number }[] = pRes.ok ? await pRes.json() : [];
+      for (const { category_code, unit_price } of priceData) priceMap[String(category_code)] = unit_price;
+      const phData: { category_code: number; unit_price: number }[] = phRes.ok ? await phRes.json() : [];
+      if (Array.isArray(phData) && phData.length > 0) {
+        for (const { category_code, unit_price } of phData) priceMap[String(category_code)] = unit_price;
+      }
+
       const p1 = priceMap['1001'] ?? 0;
       const p2 = priceMap['1002'] ?? 0;
       const p3 = priceMap['1003'] ?? 0;

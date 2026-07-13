@@ -243,36 +243,12 @@ export function Sidebar() {
   const { currentPage, roomsSubOpen, suppliesSubOpen, facilitiesSubOpen, dataRegSubOpen, navigateTo, toggleRooms, toggleSupplies, toggleFacilities, toggleDataReg } = useNavStore();
 
   const [isAdmin, setIsAdmin] = useState(true);
-  const [occupancy, setOccupancy] = useState<{ rate: string; occupied: number; total: number } | null>(null);
 
   useEffect(() => {
     try {
       const session = JSON.parse(localStorage.getItem('sci_session') ?? '{}');
       setIsAdmin(session.user_role === 'ADMIN');
     } catch { setIsAdmin(false); }
-  }, []);
-
-  useEffect(() => {
-    const baseUrl = '/api/supabase/rest/v1';
-    const headers = { 'Content-Type': 'application/json' };
-    Promise.all([
-      fetch(`${baseUrl}/room_master?category_code=eq.1000&seq=eq.1&select=room_no&order=room_no`, { headers }).then(r => r.json()),
-      fetch(`${baseUrl}/room_assignment?select=year,half_year,room_no&order=year,half_year,room_no`, { headers }).then(r => r.json()),
-    ]).then(([masters, assignments]: [{ room_no: string }[], { year: number; half_year: string; room_no: string }[]]) => {
-      let latestYear = 0, latestHalf = '';
-      for (const a of assignments) {
-        if (a.year > latestYear || (a.year === latestYear && a.half_year > latestHalf)) {
-          latestYear = a.year; latestHalf = a.half_year;
-        }
-      }
-      const cur = latestYear > 0
-        ? assignments.filter(a => a.year === latestYear && a.half_year === latestHalf)
-        : assignments;
-      const occupiedSet = new Set(cur.map(a => a.room_no));
-      const total = masters.length;
-      const occupied = masters.filter((m: { room_no: string }) => occupiedSet.has(m.room_no)).length;
-      setOccupancy({ total, occupied, rate: total > 0 ? (occupied / total * 100).toFixed(1) + '%' : '0%' });
-    }).catch(() => {});
   }, []);
 
   const renderItems = (items: NavItemDef[]) =>
@@ -398,21 +374,6 @@ export function Sidebar() {
         {renderItems(SYSTEM_ITEMS)}
       </nav>
 
-      {/* 사이드바 하단 위젯 */}
-      <div style={{
-        margin: '0 12px 14px', padding: '15px 16px', borderRadius: 12,
-        background: 'linear-gradient(135deg, #0D9488 0%, #0F766E 100%)',
-        color: '#fff', flexShrink: 0,
-      }}>
-        <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>
-          오늘 현황
-        </div>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>객실 가동율 {occupancy?.rate ?? '…'}</div>
-        <div style={{ height: 5, background: 'rgba(255,255,255,0.2)', borderRadius: 99, marginBottom: 8, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: occupancy?.rate ?? '0%', background: 'rgba(255,255,255,0.85)', borderRadius: 99, transition: 'width 0.6s ease' }} />
-        </div>
-        <div style={{ fontSize: 11, opacity: 0.72 }}>{occupancy ? `${occupancy.total}개 객실 중 ${occupancy.occupied}개 사용 중` : '로딩 중…'}</div>
-      </div>
     </aside>
   );
 }

@@ -13,6 +13,7 @@ const pool = new Pool({
 const TABLE_WHITELIST = new Set([
   'room_master', 'room_assignment', 'category_price', 'building_codes',
   'laundry_target', 'laundry_history', 'laundry_settlement', 'users', 'repair_history', 'repair_list',
+  'category_price_history',
 ]);
 
 // Primary key columns per table — used for ON CONFLICT upsert
@@ -22,8 +23,9 @@ const TABLE_PK_COLS: Record<string, string[]> = {
   building_codes:     ['code_type', 'code_value'],
   laundry_target:     ['year', 'half_year', 'chasu', 'room_no'],
   laundry_history:    ['year', 'half_year', 'chasu', 'room_no'],
-  laundry_settlement: ['year', 'half_year', 'chasu'],
-  users:              ['email'],
+  laundry_settlement:      ['year', 'half_year', 'chasu'],
+  users:                   ['email'],
+  category_price_history:  ['year', 'half_year', 'chasu', 'category_code'],
 };
 
 function quoteId(name: string) {
