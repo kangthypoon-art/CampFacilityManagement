@@ -60,8 +60,8 @@ interface NavState {
 }
 
 export const useNavStore = create<NavState>((set) => ({
-  currentPage:       'rooms',
-  roomsSubOpen:      true,
+  currentPage:       'schedule',
+  roomsSubOpen:      false,
   suppliesSubOpen:   false,
   facilitiesSubOpen: false,
   dataRegSubOpen:    false,
