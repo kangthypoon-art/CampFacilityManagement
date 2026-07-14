@@ -23,6 +23,7 @@ const getAncestors = (page: PageKey): PageKey[] => {
 };
 
 export const PAGE_NAMES: Record<PageKey, string> = {
+  schedule:               '일정관리',
   rooms:                  '객실관리',
   floorplan:              '층별 배치도',
   'data-registration':    '데이터 등록',

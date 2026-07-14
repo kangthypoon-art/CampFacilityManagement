@@ -26,6 +26,7 @@ interface NavItemDef {
 }
 
 const NAV_ITEMS: NavItemDef[] = [
+  { page: 'schedule', label: '일정관리', icon: '📅' },
   {
     page: 'rooms',
     label: '객실관리',

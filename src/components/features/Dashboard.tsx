@@ -1,6 +1,7 @@
 'use client';
 
 import { useNavStore } from '@/stores/navStore';
+import { PageSchedule } from './PageSchedule';
 import { PageRooms } from './PageRooms';
 import { PageFloorPlan } from './PageFloorPlan';
 import { PageUpload } from './PageUpload';
@@ -34,6 +35,7 @@ export function Dashboard() {
         padding: '28px 28px 36px',
       }}
     >
+      {currentPage === 'schedule'    && <PageSchedule />}
       {currentPage === 'rooms'      && <PageRooms />}
       {currentPage === 'floorplan'      && <PageFloorPlan />}
       {currentPage === 'master-upload'        && <PageMasterUpload />}

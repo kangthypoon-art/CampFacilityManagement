@@ -17,6 +17,7 @@ export type PageKey =
   | 'users'
   | 'products'
   | 'messages'
+  | 'schedule'
   | 'settings'
   | 'security';
 
